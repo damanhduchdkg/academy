@@ -1,0 +1,19 @@
+# Node
+node_modules
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+package-lock.json
+
+# Build
+dist
+build
+.next
+.out
+
+# Env
+.env
+.env.local
+.env.development
+.env.production
+.env.test
