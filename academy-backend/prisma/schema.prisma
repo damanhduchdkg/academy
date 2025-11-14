@@ -1,0 +1,230 @@
+// =======================
+// Prisma schema
+// =======================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =======================
+// ENUMS
+// =======================
+
+enum Role {
+  admin
+  manager
+  user
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum CourseLevel {
+  Basic
+  Advanced
+}
+
+enum LessonType {
+  video
+  pdf
+  slide
+  text
+}
+
+// =======================
+/**
+ * USERS & AUDIT
+ */
+// =======================
+
+model User {
+  id            String     @id @default(uuid())
+  full_name     String
+  username      String     @unique
+  password_hash String
+  role          Role
+  department    String?
+  status        UserStatus @default(active)
+  created_at    DateTime   @default(now())
+  last_login_at DateTime?
+
+  // Relations
+  activityLogs     ActivityLog[]
+  coursesCreated   Course[]             @relation("CoursesCreatedBy")
+  uploadedFiles    File[]               @relation("UserUploadedFiles")
+  lessonProgresses UserLessonProgress[] @relation("UserLessonProgressUser")
+  courseProgresses UserCourseProgress[] @relation("UserCourseProgressUser")
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user_id     String
+  action      String
+  target_type String?
+  target_id   String?
+  timestamp   DateTime @default(now())
+
+  @@index([user_id])
+  @@index([timestamp])
+}
+
+// =======================
+// COURSES & LESSONS
+// =======================
+
+model Course {
+  id            String      @id @default(uuid())
+  title         String
+  description   String? // <- để nullable cho khớp FE
+  category      String? // <- để nullable cho khớp FE
+  level         CourseLevel
+  is_required   Boolean     @default(false)
+  is_published  Boolean     @default(false)
+  allowed_roles String[] // ví dụ ["user","manager"]
+  created_by    String
+  createdByUser User        @relation("CoursesCreatedBy", fields: [created_by], references: [id], onDelete: Restrict)
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+
+  lessons        Lesson[]
+  userProgresses UserCourseProgress[]
+
+  @@index([created_by])
+  @@index([is_published])
+}
+
+model Lesson {
+  id        String @id @default(uuid())
+  course    Course @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  course_id String
+
+  title       String
+  type        LessonType
+  // video
+  video_url   String?
+  // pdf
+  pdf_url     String?
+  pdf_file_id String?
+  pdfFile     File?      @relation("Lesson_pdfFile", fields: [pdf_file_id], references: [id], onDelete: SetNull)
+
+  duration_seconds Int      @default(0)
+  order_index      Int      @default(1)
+  is_mandatory     Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  progresses UserLessonProgress[]
+
+  @@index([course_id])
+  @@index([type])
+  @@index([order_index])
+}
+
+// =======================
+// FILE STORAGE
+// =======================
+
+model File {
+  id               String  @id @default(uuid())
+  file_name        String
+  mime_type        String
+  byte_size        Int
+  storage_provider String
+  storage_key      String
+  public_url       String?
+
+  uploaded_by String
+  uploader    User   @relation("UserUploadedFiles", fields: [uploaded_by], references: [id], onDelete: SetNull)
+
+  created_at DateTime @default(now())
+  is_active  Boolean  @default(true)
+
+  // Opposite side of Lesson.pdfFile
+  pdfLessons Lesson[] @relation("Lesson_pdfFile")
+
+  @@index([uploaded_by])
+  @@index([storage_provider])
+  @@index([storage_key])
+  @@index([is_active])
+}
+
+// =======================
+// MENU (nav/permissions)
+// =======================
+
+model Menu {
+  id        String  @id @default(uuid())
+  parent    Menu?   @relation("Submenus", fields: [parent_id], references: [id], onDelete: SetNull)
+  parent_id String?
+  submenus  Menu[]  @relation("Submenus")
+
+  title         String
+  path          String
+  order_index   Int
+  visible_roles String[] // ví dụ ["user","manager","admin"]
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+
+  @@index([parent_id])
+  @@index([order_index])
+}
+
+// =======================
+// PROGRESSES
+// =======================
+
+model UserLessonProgress {
+  id String @id @default(uuid())
+
+  user    User   @relation("UserLessonProgressUser", fields: [user_id], references: [id], onDelete: Cascade)
+  user_id String
+
+  lesson    Lesson @relation(fields: [lesson_id], references: [id], onDelete: Cascade)
+  lesson_id String
+
+  watched_seconds   Int       @default(0)
+	pdfCurrentPage    Int      @default(1)
+	pdfCompletedPages Int    @default(0)
+  pdfTotalPages     Int    @default(0)
+  completed         Boolean   @default(false)
+  completed_at      DateTime?
+  last_seen_at      DateTime  @default(now())
+  last_position_sec Int       @default(0)
+
+  coverage_json    Json? // mảng interval [[start,end), ...]
+  violated_at      DateTime?
+  last_hb_at       DateTime?
+  violation_reason String?
+
+  @@unique([user_id, lesson_id], name: "user_id_lesson_id")
+  @@index([lesson_id])
+  @@index([user_id])
+  @@index([completed])
+  @@index([violated_at])
+}
+
+model UserCourseProgress {
+  id String @id @default(uuid())
+
+  user    User   @relation("UserCourseProgressUser", fields: [user_id], references: [id], onDelete: Cascade)
+  user_id String
+
+  course    Course @relation(fields: [course_id], references: [id], onDelete: Cascade)
+  course_id String
+
+  completion_percent Decimal   @default(0.0)
+  is_completed       Boolean   @default(false)
+  completed_at       DateTime?
+
+  @@unique([user_id, course_id], name: "user_id_course_id")
+  @@index([course_id])
+  @@index([user_id])
+}

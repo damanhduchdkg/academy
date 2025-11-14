@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    // ... phần trên giữ nguyên như mình đưa ở bước trước ...
+    "module": "commonjs",
+    "target": "es2022",
+    "lib": ["es2021"],
+    "moduleResolution": "node",
+    "rootDir": "./",
+    "outDir": "./dist",
+
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+
+    "removeComments": true,
+    "declaration": true,
+    "sourceMap": true,
+
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "noFallthroughCasesInSwitch": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "incremental": true,
+
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": ["*"],
+      "@prisma/*": ["prisma/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "generated", // <- thêm dòng này
+    "prisma", // (tuỳ bạn, giải thích bên dưới)
+    "**/*.spec.ts"
+  ]
+}
