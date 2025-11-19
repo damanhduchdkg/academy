@@ -322,13 +322,19 @@ export default function PdfTrackedViewer({
       });
     }
 
-    if (onPageProgress) {
-      onPageProgress({
-        completedPages: initCompleted,
-        totalPages: initTotal || numPages || 0,
-        currentPage: initPage > 0 ? initPage : 1,
-      });
-    }
+    if (!onPageProgress) return;
+    const total = numPages || 0;
+
+    // Nếu bài đã hoàn thành → xem như đã xong tất cả trang
+    const completed = disableGuards
+      ? total
+      : Math.min(completedPagesCount, total);
+
+    onPageProgress({
+      completedPages: completed,
+      totalPages: total,
+      currentPage: pageNumber,
+    });
   }, [
     initialCompletedPages,
     initialTotalPages,

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { LessonType, Prisma } from '@prisma/client';
 
 const LESSON_COMPLETE_THRESHOLD = 0.98; // >=98%
 const FINISH_EPSILON_SECONDS = 1.0; // nới 1s ở cuối video
@@ -116,25 +116,49 @@ export class LessonsService {
 
     const prev = lesson.progresses[0] as any;
 
-    /** 0) Nếu là bài KHÔNG phải video (pdf/slide/text) */
+    /**
+     * =========================
+     * 0) NON-VIDEO (PDF/SLIDE/TEXT)
+     * =========================
+     */
     if (lesson.type !== 'video') {
-      // chuẩn hoá số trang pdf (nếu FE gửi lên)
-      const newPdfCompleted =
-        typeof pdfCompletedPages === 'number'
-          ? // ? Math.max(0, Math.floor(pdfCompletedPages))
-            pdfCompletedPages
-          : (prev?.pdfCompletedPages ?? 0);
+      const prevCompleted = prev?.pdfCompletedPages ?? 0;
+      const prevTotal = prev?.pdfTotalPages ?? 0;
+      const prevCurrent = prev?.pdfCurrentPage ?? 1;
 
-      const newPdfTotal =
-        typeof pdfTotalPages === 'number'
-          ? pdfTotalPages
-          : // ? Math.max(0, Math.floor(pdfTotalPages))
-            (prev?.pdfTotalPages ?? 0);
-
-      const safeCurrent =
+      // trang hiện tại FE đang đứng
+      const reqCurrent =
         typeof pdfCurrentPage === 'number' && pdfCurrentPage > 0
-          ? pdfCurrentPage
-          : (prev?.pdfCurrentPage ?? 1);
+          ? Math.floor(pdfCurrentPage)
+          : undefined;
+
+      // FE có thể gửi thêm số trang đã hoàn thành
+      const reqCompleted =
+        typeof pdfCompletedPages === 'number'
+          ? Math.max(0, Math.floor(pdfCompletedPages))
+          : undefined;
+
+      // tổng số trang
+      const reqTotal =
+        typeof pdfTotalPages === 'number'
+          ? Math.max(0, Math.floor(pdfTotalPages))
+          : undefined;
+
+      // => không bao giờ cho tụt
+      const nextTotal = Math.max(prevTotal, reqTotal ?? 0);
+
+      // completedPages không bao giờ < trang hiện tại và < giá trị cũ
+      const baseCompleted = Math.max(prevCompleted, reqCompleted ?? 0);
+      const nextCompleted =
+        reqCurrent !== undefined
+          ? Math.max(baseCompleted, reqCurrent)
+          : baseCompleted;
+
+      // currentPage cũng không được nhỏ hơn cái cũ
+      const nextCurrent =
+        reqCurrent !== undefined
+          ? Math.max(prevCurrent, reqCurrent)
+          : prevCurrent;
 
       const updated = await this.prisma.userLessonProgress.upsert({
         where: { user_id_lesson_id: { user_id: userId, lesson_id: lessonId } },
@@ -146,21 +170,18 @@ export class LessonsService {
           completed_at: prev?.completed_at ?? null,
           last_seen_at: new Date(),
           last_position_sec: 0,
-          // 👇 lưu số trang PDF
-          pdfCompletedPages: newPdfCompleted,
-          pdfTotalPages: newPdfTotal,
-          pdfCurrentPage: safeCurrent,
+          pdfCompletedPages: nextCompleted,
+          pdfTotalPages: nextTotal,
+          pdfCurrentPage: nextCurrent,
         },
         update: {
           last_seen_at: new Date(),
-          // không đụng watched_seconds / violation
-          pdfCurrentPage: safeCurrent,
-          pdfCompletedPages: newPdfCompleted,
-          pdfTotalPages: newPdfTotal,
+          pdfCompletedPages: nextCompleted,
+          pdfTotalPages: nextTotal,
+          pdfCurrentPage: nextCurrent,
         },
       });
 
-      // cập nhật course progress (trong trường hợp bài non-video đã hoàn thành trước đó)
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
         courseId: lesson.course_id,
@@ -183,7 +204,12 @@ export class LessonsService {
       };
     }
 
-    /** 1) Nếu VIDEO đã hoàn thành: không nhận thêm tiến trình/vi phạm */
+    /**
+     * =========================
+     * 1) VIDEO – GIỮ NGUYÊN NHƯ CŨ
+     * =========================
+     */
+
     if (prev?.completed) {
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
@@ -205,7 +231,6 @@ export class LessonsService {
       };
     }
 
-    /** 2) Nếu VIDEO đã bị gắn cờ vi phạm trước đó: block & ép resume=0 */
     if (prev?.violated_at) {
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
@@ -227,7 +252,6 @@ export class LessonsService {
       };
     }
 
-    /** 3) Tính toán tiến độ cho VIDEO */
     const totalDuration = lesson.duration_seconds ?? 0;
     const prevWatched = prev?.watched_seconds ?? 0;
 
@@ -248,7 +272,6 @@ export class LessonsService {
         : (prev?.completed_at ?? null),
       last_seen_at: new Date(),
       last_position_sec: safeLastPos,
-      // giữ nguyên pdf_* hiện tại nếu có
     };
 
     if (markViolated) {
@@ -272,7 +295,6 @@ export class LessonsService {
         violated_at: (data as any).violated_at ?? undefined,
         violation_reason: (data as any).violation_reason ?? undefined,
         coverage_json: (data as any).coverage_json ?? undefined,
-        // pdf_* cho video default = 0
         pdfCompletedPages: 0,
         pdfTotalPages: 0,
       },
@@ -304,12 +326,11 @@ export class LessonsService {
         violation_reason: updatedLessonProgress.violation_reason ?? null,
         pdfCompletedPages:
           (updatedLessonProgress as any).pdfCompletedPages ?? 0,
-        pdfTotalPages: (updatedLessonProgress as any).pdfCompletedPages ?? 0,
+        pdfTotalPages: (updatedLessonProgress as any).pdfTotalPages ?? 0,
       },
       courseProgress,
     };
   }
-
   /** PATCH /lessons/:lessonId/finalize */
   async finalizeLesson(args: {
     userId: string;
@@ -728,6 +749,268 @@ export class LessonsService {
         is_completed: up.is_completed,
         completed_at: up.completed_at,
       },
+    };
+  }
+
+  /**
+   * Gắn 1 File (PDF/Video) vào bài học.
+   * - Nếu type = 'pdf' -> set pdf_file_id + pdf_url
+   * - Nếu type = 'video' -> set video_url = file.public_url
+   */
+  async attachFileToLesson(params: {
+    lessonId: string;
+    fileId: string;
+    userId: string; // để sau này nếu muốn ghi log ai là người gán file
+  }) {
+    const { lessonId, fileId, userId } = params;
+
+    // 1. Check lesson
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true, type: true, title: true },
+    });
+    if (!lesson) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    // 2. Check file
+    const file = await this.prisma.file.findUnique({
+      where: { id: fileId },
+      select: {
+        id: true,
+        file_name: true,
+        mime_type: true,
+        public_url: true,
+        is_active: true,
+      },
+    });
+    if (!file || !file.is_active) {
+      throw new NotFoundException('File không tồn tại hoặc đã bị vô hiệu');
+    }
+
+    // URL dùng cho FE:
+    // - Nếu là link ngoài: dùng public_url
+    // - Nếu là file nội bộ (upload): dùng /files/:fileId
+    const fileUrl = file.public_url ?? `/files/${file.id}`;
+
+    let updated;
+
+    // 3. Tuỳ theo type bài học mà set field phù hợp
+    if (lesson.type === LessonType.pdf) {
+      updated = await this.prisma.lesson.update({
+        where: { id: lessonId },
+        data: {
+          pdf_file_id: file.id,
+          pdf_url: fileUrl,
+        },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          pdf_file_id: true,
+          pdf_url: true,
+          video_url: true,
+        },
+      });
+    } else if (lesson.type === LessonType.video) {
+      updated = await this.prisma.lesson.update({
+        where: { id: lessonId },
+        data: {
+          video_url: fileUrl,
+        },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          pdf_file_id: true,
+          pdf_url: true,
+          video_url: true,
+        },
+      });
+    } else {
+      // Các type khác (slide/text) tạm thời gán như PDF
+      updated = await this.prisma.lesson.update({
+        where: { id: lessonId },
+        data: {
+          pdf_file_id: file.id,
+          pdf_url: fileUrl,
+        },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          pdf_file_id: true,
+          pdf_url: true,
+          video_url: true,
+        },
+      });
+    }
+
+    // 4. (Tuỳ chọn) ghi activity log – nếu anh muốn sau này tra audit
+    await this.prisma.activityLog.create({
+      data: {
+        user_id: userId,
+        action: 'ATTACH_FILE_TO_LESSON',
+        target_type: 'lesson',
+        target_id: lessonId,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Gỡ file khỏi bài học (KHÔNG xoá record File, chỉ unlink).
+   */
+  async detachFileFromLesson(lessonId: string) {
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true, type: true },
+    });
+    if (!lesson) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    const data: any = {};
+    if (lesson.type === LessonType.pdf) {
+      data.pdf_file_id = null;
+      data.pdf_url = null;
+    } else if (lesson.type === LessonType.video) {
+      // nếu video đang dùng file mp4 thì gỡ link file
+      data.video_url = null;
+    } else {
+      data.pdf_file_id = null;
+      data.pdf_url = null;
+    }
+
+    const updated = await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data,
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        pdf_file_id: true,
+        pdf_url: true,
+        video_url: true,
+      },
+    });
+    return updated;
+  }
+
+  /**
+   * Gắn link YouTube cho bài học (thường type = 'video').
+   */
+  async attachYoutubeToLesson(params: {
+    lessonId: string;
+    youtubeUrl: string;
+  }) {
+    const { lessonId, youtubeUrl } = params;
+
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true },
+    });
+    if (!lesson) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    // (Nếu cần, anh có thể normalize url tại đây)
+    const updated = await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data: {
+        video_url: youtubeUrl,
+      },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        video_url: true,
+      },
+    });
+    return updated;
+  }
+
+  /**
+   * Gỡ link YouTube khỏi bài học.
+   */
+  async detachYoutubeFromLesson(lessonId: string) {
+    const lesson = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true },
+    });
+    if (!lesson) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    const updated = await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data: { video_url: null },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        video_url: true,
+      },
+    });
+    return updated;
+  }
+
+  // LẤY DANH SÁCH BÀI HỌC CHO ADMIN
+  async listLessonsForAdmin(params: {
+    courseId?: string;
+    search?: string;
+    page: number;
+    pageSize: number;
+  }) {
+    const { courseId, search, page, pageSize } = params;
+
+    const where: any = {};
+
+    if (courseId) {
+      where.course_id = courseId;
+    }
+
+    if (search) {
+      where.title = {
+        contains: search,
+        mode: 'insensitive',
+      };
+    }
+
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.lesson.findMany({
+        where,
+        orderBy: [
+          { course_id: 'asc' },
+          { order_index: 'asc' },
+          { created_at: 'desc' },
+        ],
+        skip,
+        take,
+        select: {
+          id: true,
+          course_id: true,
+          title: true,
+          type: true,
+          duration_seconds: true,
+          order_index: true,
+          is_mandatory: true,
+          created_at: true,
+          updated_at: true,
+        },
+      }),
+      this.prisma.lesson.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
     };
   }
 }

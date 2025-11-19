@@ -1,6 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCourseDto } from './dto/create-course.dto';
+import { UpdateCourseDto } from './dto/update-course.dto';
+import { CourseLevel } from '@prisma/client';
 
 @Injectable()
 export class CoursesService {
@@ -137,33 +143,6 @@ export class CoursesService {
    * Lọc quyền xem theo:
    *  - is_published = true
    *  - allowed_roles has <role>
-   *
-   * Trả về:
-   * {
-   *   id,
-   *   title,
-   *   description,
-   *   category,
-   *   is_required,
-   *   lessons: [
-   *     {
-   *       id,
-   *       order,
-   *       title,
-   *       type,
-   *       duration_minutes,
-   *       is_required,
-   *       user_progress: {
-   *         completed: boolean,
-   *         unlocked: boolean
-   *       }
-   *     }, ...
-   *   ],
-   *   courseProgress: {
-   *     completion_percent: number, // 0..100 đã chuẩn hoá
-   *     is_completed: boolean       // true chỉ khi >=100%
-   *   }
-   * }
    */
   async getCourseDetailForUser(courseId: string, userId: string, role: string) {
     // chỉ lấy khoá học mà user có quyền xem
@@ -240,10 +219,6 @@ export class CoursesService {
 
     /**
      * ----- Chuẩn hoá danh sách bài học -----
-     * B1: map từng bài thành rawLessons (chưa có unlocked)
-     * B2: duyệt rawLessons để gắn unlocked theo thứ tự
-     *     - Bài đầu tiên luôn unlocked = true
-     *     - Bài i>1 unlocked = true nếu bài (i-1) completed
      */
     const rawLessons = course.lessons.map((l) => {
       const lp = l.progresses[0]; // progress của user cho bài này (nếu có)
@@ -287,9 +262,6 @@ export class CoursesService {
       };
     });
 
-    /**
-     * ----- Response cuối -----
-     */
     return {
       id: course.id,
       title: course.title,
@@ -303,7 +275,8 @@ export class CoursesService {
 
   /**
    * Admin tạo khoá học mới.
-   * (Giữ nguyên logic create như trước)
+   * Dùng cho cả endpoint cũ (/courses/admin/courses) và mới (/admin/courses).
+   * Cho phép thiếu level / allowed_roles, sẽ gán default.
    */
   async createCourseForAdmin(adminUserId: string, body: CreateCourseDto) {
     const created = await this.prisma.course.create({
@@ -320,13 +293,237 @@ export class CoursesService {
       select: {
         id: true,
         title: true,
+        description: true,
+        category: true,
+        level: true,
         is_required: true,
         is_published: true,
         allowed_roles: true,
-        created_at: true,
+        lessons: { select: { id: true } },
       },
     });
 
-    return created;
+    return {
+      id: created.id,
+      title: created.title,
+      description: created.description,
+      category: created.category,
+      level: created.level,
+      is_required: created.is_required,
+      is_published: created.is_published,
+      allowed_roles: created.allowed_roles,
+      lessons_count: created.lessons.length,
+    };
+  }
+
+  /**
+   * Admin xem danh sách khoá học (cho màn Admin → Quản lý khoá học)
+   */
+
+  async adminList(params: { page: number; pageSize: number }) {
+    const { page, pageSize } = params;
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.course.findMany({
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          level: true,
+          is_required: true,
+          is_published: true,
+          allowed_roles: true,
+          lessons: { select: { id: true } },
+        },
+      }),
+      this.prisma.course.count(),
+    ]);
+
+    const data = items.map((c) => ({
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      category: c.category,
+      level: c.level, // <<– trả ra level
+      is_required: c.is_required,
+      is_published: c.is_published,
+      allowed_roles: c.allowed_roles, // <<– trả ra allowed_roles
+      lessons_count: c.lessons.length,
+    }));
+
+    return { page, pageSize, total, data };
+  }
+
+  /**
+   * Gán khoá học cho user (bảng UserCourseAssignment)
+   */
+  async assignUserToCourse(courseId: string, userId: string) {
+    if (!courseId) {
+      throw new BadRequestException('courseId is required');
+    }
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true },
+    });
+    if (!course) {
+      throw new NotFoundException('Course không tồn tại');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User không tồn tại');
+    }
+
+    const assignment = await this.prisma.userCourseAssignment.upsert({
+      where: {
+        user_id_course_id: {
+          user_id: userId,
+          course_id: courseId,
+        },
+      },
+      update: {},
+      create: {
+        user_id: userId,
+        course_id: courseId,
+      },
+    });
+
+    return {
+      message: 'Gán khoá học cho user thành công',
+      assignment,
+    };
+  }
+
+  /**
+   * Bỏ gán khoá học khỏi user
+   */
+  async unassignUserFromCourse(courseId: string, userId: string) {
+    await this.prisma.userCourseAssignment.deleteMany({
+      where: {
+        user_id: userId,
+        course_id: courseId,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Gỡ gán khoá học thành công',
+    };
+  }
+
+  /**
+   * Admin cập nhật thông tin khoá học
+   */
+  async updateCourseForAdmin(courseId: string, body: Partial<UpdateCourseDto>) {
+    const existing = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Course không tồn tại');
+    }
+
+    const updated = await this.prisma.course.update({
+      where: { id: courseId },
+      data: {
+        title: body.title ?? existing.title,
+        description: body.description ?? existing.description,
+        category: body.category ?? existing.category,
+        level: body.level ?? existing.level,
+        is_required:
+          typeof body.is_required === 'boolean'
+            ? body.is_required
+            : existing.is_required,
+        is_published:
+          typeof body.is_published === 'boolean'
+            ? body.is_published
+            : existing.is_published,
+        allowed_roles:
+          body.allowed_roles && body.allowed_roles.length > 0
+            ? (body.allowed_roles as any)
+            : existing.allowed_roles,
+      },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        is_required: true,
+        is_published: true,
+        allowed_roles: true,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Admin xoá khoá học
+   */
+  async deleteCourseByAdmin(courseId: string) {
+    const existing = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, title: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Course không tồn tại');
+    }
+
+    // Tuỳ ý: nếu muốn cứng hơn thì check lessons count trước khi xoá
+
+    await this.prisma.course.delete({
+      where: { id: courseId },
+    });
+
+    return {
+      success: true,
+      message: `Đã xoá khoá "${existing.title}"`,
+    };
+  }
+
+  /**
+   * Admin bật/tắt publish khoá học (active / inactive)
+   */
+  async togglePublishStatus(courseId: string) {
+    const existing = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: {
+        id: true,
+        title: true,
+        is_published: true,
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Course không tồn tại');
+    }
+
+    const updated = await this.prisma.course.update({
+      where: { id: courseId },
+      data: {
+        is_published: !existing.is_published,
+      },
+      select: {
+        id: true,
+        title: true,
+        is_published: true,
+      },
+    });
+
+    return {
+      ...updated,
+      status: updated.is_published ? 'active' : 'inactive',
+    };
   }
 }

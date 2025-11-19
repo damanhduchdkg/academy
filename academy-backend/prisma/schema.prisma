@@ -49,7 +49,7 @@ model User {
   full_name     String
   username      String     @unique
   password_hash String
-  role          Role
+  role          Role			 @default(user)
   department    String?
   status        UserStatus @default(active)
   created_at    DateTime   @default(now())
@@ -61,6 +61,7 @@ model User {
   uploadedFiles    File[]               @relation("UserUploadedFiles")
   lessonProgresses UserLessonProgress[] @relation("UserLessonProgressUser")
   courseProgresses UserCourseProgress[] @relation("UserCourseProgressUser")
+	courseAssignments  UserCourseAssignment[] @relation("UserCourseAssignments")
 }
 
 model ActivityLog {
@@ -96,6 +97,7 @@ model Course {
 
   lessons        Lesson[]
   userProgresses UserCourseProgress[]
+	userAssignments UserCourseAssignment[] @relation("CourseUserAssignments")
 
   @@index([created_by])
   @@index([is_published])
@@ -204,6 +206,7 @@ model UserLessonProgress {
   last_hb_at       DateTime?
   violation_reason String?
 
+
   @@unique([user_id, lesson_id], name: "user_id_lesson_id")
   @@index([lesson_id])
   @@index([user_id])
@@ -227,4 +230,21 @@ model UserCourseProgress {
   @@unique([user_id, course_id], name: "user_id_course_id")
   @@index([course_id])
   @@index([user_id])
+}
+
+
+model UserCourseAssignment {
+  id        String   @id @default(uuid())
+
+  user      User     @relation("UserCourseAssignments", fields: [user_id], references: [id], onDelete: Cascade)
+  user_id   String
+
+  course    Course   @relation("CourseUserAssignments", fields: [course_id], references: [id], onDelete: Cascade)
+  course_id String
+
+  created_at DateTime @default(now())
+
+  @@unique([user_id, course_id], name: "user_id_course_id")
+  @@index([user_id])
+  @@index([course_id])
 }

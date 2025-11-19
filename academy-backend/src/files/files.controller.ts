@@ -1,16 +1,24 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   NotFoundException,
   Param,
+  Post,
   Query,
+  Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FilesService } from './files.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
+import { Roles } from '@/auth/roles.decorator';
+import { Role } from '@/auth/roles.enum';
+import { RegisterFileDto } from './dto/register-file.dto';
 
 /* ====== Kiểu meta cũ/mới ====== */
 type MetaOld = {
@@ -35,6 +43,7 @@ type MetaNew = {
 
 type FileMeta = MetaOld | MetaNew;
 
+@UseGuards(JwtAuthGuard)
 @Controller('files')
 export class FilesController {
   constructor(private readonly filesService: FilesService) {}
@@ -128,6 +137,8 @@ export class FilesController {
         'Content-Security-Policy',
         `frame-ancestors 'self' ${allowFrames}`,
       );
+
+      const fileName = sanitizeFileName((meta as any).file_name);
 
       res.setHeader(
         'Content-Disposition',
@@ -282,5 +293,20 @@ export class FilesController {
 
 function sanitizeFileName(name: string | undefined): string {
   if (!name) return 'file';
-  return name.replace(/[/\\?%*:|"<>]/g, '_');
+
+  // 1) Chuẩn hoá: tách dấu khỏi chữ (Ví dụ: "ấ" -> "a" + dấu)
+  let safe = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+
+  // 2) Loại bỏ mọi ký tự ngoài ASCII chuẩn (từ space tới ~)
+  safe = safe.replace(/[^\x20-\x7E]/g, '_');
+
+  // 3) Loại bỏ các ký tự bị cấm trong tên file
+  safe = safe.replace(/[/\\?%*:|"<>]/g, '_');
+
+  // 4) Nếu rỗng thì fallback
+  if (!safe.trim()) {
+    safe = 'file';
+  }
+
+  return safe;
 }

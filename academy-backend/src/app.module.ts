@@ -14,6 +14,10 @@ import { ConfigModule } from '@nestjs/config';
 import { RedisModule } from './redis/redis.module';
 import { FilesModule } from './files/files.module';
 
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { RolesGuard } from './auth/roles.guard'; // nếu anh đã tạo
+
 @Module({
   imports: [
     PrismaModule,
@@ -26,6 +30,17 @@ import { FilesModule } from './files/files.module';
     FilesModule,
   ],
   controllers: [AppController, CoursesController],
-  providers: [AppService, CoursesService],
+  providers: [
+    AppService,
+    CoursesService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard, // 👈 tất cả route đều đi qua JWT guard
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard, // 👈 rồi mới tới Roles guard
+    },
+  ],
 })
 export class AppModule {}

@@ -7,15 +7,18 @@ import { ConfigService } from '@nestjs/config';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly configService: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        // 1. Ưu tiên lấy từ header Authorization: Bearer ...
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // 2. Nếu không có, lấy từ query ?token=...
+        ExtractJwt.fromUrlQueryParameter('token'),
+      ]),
       ignoreExpiration: false,
-      // getOrThrow để chắc chắn có JWT_SECRET (nếu project bạn dùng @nestjs/config mới)
       secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
     });
   }
 
   async validate(payload: any) {
-    // payload chính là cái mình ký trong AuthService
     return {
       user_id: payload.user_id,
       role: payload.role,

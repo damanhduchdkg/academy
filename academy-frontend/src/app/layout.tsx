@@ -13,7 +13,8 @@ import {
 } from "@mui/material";
 import theme from "@/theme";
 import { useEffect, useState } from "react";
-import Link from "next/link";
+// import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 // import "@/app/pdf.worker"; // kích hoạt worker cho toàn app
 
 interface CurrentUser {
@@ -22,11 +23,48 @@ interface CurrentUser {
   role: string;
 }
 
+function TopNavLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href); // để /courses, /noi-quy active đúng
+
+  return (
+    <Button
+      onClick={() => router.push(href)}
+      sx={{
+        textTransform: "none",
+        fontSize: "0.9rem",
+        fontWeight: 500,
+        color: "#fff",
+        minWidth: "auto",
+        p: 0,
+        "&:hover": {
+          color: "#ffd700",
+          background: "transparent",
+        },
+        ...(isActive
+          ? { borderBottom: "2px solid #ffd700", borderRadius: 0 }
+          : {}),
+      }}
+    >
+      {children}
+    </Button>
+  );
+}
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname() || "/";
   // token lưu từ localStorage
   const [token, setToken] = useState<string | null>(null);
   // thông tin user lấy từ /auth/me
@@ -97,31 +135,76 @@ export default function RootLayout({
               }}
             >
               {/* LEFT NAV */}
-              <Stack direction="row" spacing={3} alignItems="center">
+              <Stack direction="row" spacing={2} alignItems="center">
                 <Typography
                   variant="h6"
-                  sx={{ fontWeight: 600, color: "#fff" }}
+                  sx={{ fontWeight: 600, color: "#fff", mr: 2 }}
                 >
                   Academy
                 </Typography>
 
+                {/* Nhóm tab */}
                 <Stack
                   direction="row"
-                  spacing={2}
+                  spacing={1.5}
                   sx={{
                     display: { xs: "none", sm: "flex" },
-                    "& a": {
-                      color: "#fff",
-                      fontSize: "0.9rem",
-                      fontWeight: 500,
-                      textDecoration: "none",
-                      "&:hover": { color: theme.palette.secondary.main },
-                    },
                   }}
                 >
-                  <Link href="/">Home</Link>
-                  <Link href="/courses">Đào tạo</Link>
-                  <Link href="/noi-quy">Nội quy</Link>
+                  {[
+                    { label: "Home", href: "/" },
+                    { label: "Đào tạo", href: "/courses" },
+                    { label: "Nội quy", href: "/noi-quy" },
+                    // Admin chỉ hiện khi là admin/manager
+                    ...(user &&
+                    (user.role === "admin" || user.role === "manager")
+                      ? [{ label: "Admin", href: "/admin" }]
+                      : []),
+                  ].map((item) => {
+                    const active =
+                      pathname === item.href ||
+                      pathname.startsWith(item.href + "/"); // vd /courses/abc vẫn active "Đào tạo"
+
+                    return (
+                      <Button
+                        key={item.href}
+                        onClick={() => (window.location.href = item.href)}
+                        variant="text"
+                        sx={{
+                          textTransform: "none",
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          minWidth: "auto",
+                          px: 2.5,
+                          py: 0.7,
+                          borderRadius: 999,
+
+                          // màu chữ + nền khi active
+                          color: active ? theme.palette.primary.main : "#fff",
+                          backgroundColor: active ? "#ffffff" : "transparent",
+                          boxShadow: active
+                            ? "0 6px 18px rgba(0,0,0,0.18)"
+                            : "none",
+
+                          // HOVER giống screenshot: nền nhẹ, chữ vẫn rõ
+                          "&:hover": {
+                            backgroundColor: active
+                              ? "#ffffff"
+                              : "rgba(255,255,255,0.18)",
+                            color: active ? theme.palette.primary.main : "#fff",
+                          },
+
+                          // FOCUS (tab bằng bàn phím) – viền mờ
+                          "&:focus-visible": {
+                            outline: "2px solid rgba(255,255,255,0.8)",
+                            outlineOffset: 2,
+                          },
+                        }}
+                      >
+                        {item.label}
+                      </Button>
+                    );
+                  })}
                 </Stack>
               </Stack>
 
@@ -202,7 +285,7 @@ export default function RootLayout({
           <Box
             component="main"
             sx={{
-              maxWidth: 960,
+              // maxWidth: 1280,
               mx: "auto",
               width: "100%",
               p: 2,

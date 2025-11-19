@@ -5,6 +5,7 @@ import YouTubeTrackedPlayer, {
   OnViolation,
 } from "./YouTubeTrackedPlayer";
 import dynamic from "next/dynamic";
+import { authFetch } from "@/lib/authFetch";
 
 const PdfTrackedViewer = dynamic(() => import("./PdfTrackedViewer"), {
   ssr: false,
@@ -75,6 +76,41 @@ export default function LessonContentViewer(props: {
     initialPage,
   } = props;
 
+  // ⚡ Handler riêng cho PDF: vừa báo ra ngoài, vừa gọi API lưu DB
+  async function handlePdfPageProgress(info: {
+    completedPages: number;
+    totalPages: number;
+    currentPage: number;
+  }) {
+    // báo cho parent (nếu có) để update UI như cũ
+    if (onPageProgress) {
+      try {
+        onPageProgress(info);
+      } catch (e) {
+        console.error("onPageProgress handler error:", e);
+      }
+    }
+
+    // không có lessonId thì thôi, tránh call API
+    if (!lessonId) return;
+
+    try {
+      await authFetch(`/lessons/${lessonId}/progress`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          // PDF không dùng watchedSeconds / lastPositionSec nhưng BE có thể expect field → gửi 0 cho an toàn
+          watchedSeconds: 0,
+          lastPositionSec: 0,
+          pdfCurrentPage: info.currentPage,
+          pdfCompletedPages: info.completedPages,
+          pdfTotalPages: info.totalPages,
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to update PDF progress", e);
+    }
+  }
+
   if (type === "video" && youtubeUrl) {
     return (
       <YouTubeTrackedPlayer
@@ -97,7 +133,8 @@ export default function LessonContentViewer(props: {
         onEnded={onEnded}
         disableGuards={disableGuards}
         lessonId={lessonId}
-        onPageProgress={onPageProgress}
+        // ⚡ dùng handler mới: vừa gọi onPageProgress cũ, vừa bắn API
+        onPageProgress={handlePdfPageProgress}
         initialCompletedPages={initialPdfCompletedPages}
         initialTotalPages={initialPdfTotalPages}
         initialPage={initialPage}

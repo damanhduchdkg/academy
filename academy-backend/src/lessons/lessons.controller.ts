@@ -22,6 +22,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { JwtAuthGuard } from '@/auth/jwt-auth.guard';
 
 class UpdateProgressDto {
   @Type(() => Number)
@@ -81,7 +82,8 @@ class MarkViolationDto {
   coverage?: any; // snapshot tuỳ chọn
 }
 
-@UseGuards(AuthGuard('jwt'))
+// @UseGuards(AuthGuard('jwt'))
+@UseGuards(JwtAuthGuard)
 @Controller('lessons')
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}

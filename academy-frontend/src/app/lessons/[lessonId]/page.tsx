@@ -26,7 +26,7 @@ const toAbs = (u?: string | null) => {
 };
 
 // Nếu endpoint /files cần token qua query (vì iframe không gửi header)
-const APPEND_TOKEN_IN_QUERY = false; // đổi true nếu BE yêu cầu token ở query
+const APPEND_TOKEN_IN_QUERY = true; // đổi true nếu BE yêu cầu token ở query
 const withTokenQ = (absUrl: string | null) => {
   if (!absUrl) return null;
   if (!APPEND_TOKEN_IN_QUERY) return absUrl;

@@ -1,13 +1,13 @@
 import {
+  Body,
   Controller,
   Get,
-  Param,
-  Req,
-  UseGuards,
   NotFoundException,
-  Body,
+  Param,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
 import { AuthGuard } from '@nestjs/passport';
@@ -57,7 +57,8 @@ export class CoursesController {
     return data;
   }
 
-  // POST /courses/admin/courses
+  // Endpoint cũ Sprint 1: POST /courses/admin/courses
+  // (vẫn giữ để không vỡ chỗ khác, nếu có dùng)
   @UseGuards(AuthGuard('jwt'), AdminGuard)
   @Post('/admin/courses')
   async createCourse(@Req() req: any, @Body() body: CreateCourseDto) {
