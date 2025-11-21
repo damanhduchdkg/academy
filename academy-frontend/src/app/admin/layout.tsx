@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Tổng quan" },
   { href: "/admin/users", label: "Quản lý user" },
   { href: "/admin/courses", label: "Quản lý khoá học" },
+  { href: "/admin/lessons", label: "Quản lý bài học" }, // 👈 TAB MỚI
   { href: "/admin/files", label: "Quản lý file" },
 ];
 
@@ -84,13 +85,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     px: 2,
                     justifyContent: "flex-start",
                     textAlign: "left",
-                    // màu bình thường
                     backgroundColor: "#ffffff",
                     color: "#000000",
                     "&:hover": {
                       backgroundColor: "rgba(2,0,107,0.08)",
                     },
-                    // màu khi ACTIVE (đúng như bạn muốn)
                     "&.Mui-selected": {
                       backgroundColor: "#02006b",
                       color: "#ffffff",

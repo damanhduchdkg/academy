@@ -1,41 +1,25 @@
+// src/courses/courses.service.ts
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
-import { CourseLevel } from '@prisma/client';
+import { CourseLevel, Prisma } from '@prisma/client';
 
 @Injectable()
 export class CoursesService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Danh sách khoá học (có phân trang, search) dành cho user hiện tại.
-   *
-   * Trả về:
-   * {
-   *   page,
-   *   pageSize,
-   *   total,
-   *   data: [
-   *     {
-   *       id,
-   *       title,
-   *       description,
-   *       category,
-   *       is_required,
-   *       lessons_count,
-   *       courseProgress: {
-   *         completion_percent: number; // 0..100 đã chuẩn hoá
-   *         is_completed: boolean;      // true chỉ khi >=100%
-   *       }
-   *     },
-   *     ...
-   *   ]
-   * }
+   * Danh sách khoá học cho user hiện tại (FE trang "Đào tạo").
+   * Chỉ hiển thị nếu:
+   *  - Khoá đã publish
+   *  - Role user nằm trong allowed_roles
+   *  - User đã được gán khoá (UserCourseAssignment)
    */
   async searchCoursesForUser(params: {
     userId: string;
@@ -46,17 +30,20 @@ export class CoursesService {
   }) {
     const { userId, role, search, page, pageSize } = params;
 
-    // Điều kiện khoá học mà user được phép thấy:
-    // - is_published = true
-    // - allowed_roles CONTAINS vai trò hiện tại
-    const baseWhere: any = {
+    const baseWhere: Prisma.CourseWhereInput = {
       is_published: true,
       allowed_roles: {
         has: role,
       },
+      // 🔹 BẮT BUỘC: user phải được gán khoá
+      userAssignments: {
+        some: {
+          user_id: userId,
+        },
+      },
     };
 
-    const where = search
+    const where: Prisma.CourseWhereInput = search
       ? {
           ...baseWhere,
           OR: [
@@ -67,7 +54,6 @@ export class CoursesService {
         }
       : baseWhere;
 
-    // Lấy danh sách khoá học + progress tổng của user với mỗi khoá
     const [items, total] = await this.prisma.$transaction([
       this.prisma.course.findMany({
         where,
@@ -80,16 +66,12 @@ export class CoursesService {
           description: true,
           category: true,
           is_required: true,
-
-          lessons: {
-            select: { id: true },
-          },
-
+          lessons: { select: { id: true } },
           userProgresses: {
             where: { user_id: userId },
             select: {
               completion_percent: true,
-              is_completed: true, // giá trị gốc DB (có thể không chuẩn)
+              is_completed: true,
             },
             take: 1,
           },
@@ -98,22 +80,18 @@ export class CoursesService {
       this.prisma.course.count({ where }),
     ]);
 
-    // Chuẩn hoá dữ liệu trả về cho FE
     const data = items.map((c) => {
       const rawProgress = c.userProgresses[0] ?? {
         completion_percent: 0,
         is_completed: false,
       };
 
-      // ép completion_percent thành số trong khoảng [0..100]
       const pctNum = Number(rawProgress.completion_percent) || 0;
       const normalizedPercent = (() => {
         if (pctNum < 0) return 0;
         if (pctNum > 100) return 100;
         return Math.round(pctNum);
       })();
-
-      // is_completed chỉ TRUE khi >=100%
       const normalizedDone = normalizedPercent >= 100;
 
       return {
@@ -140,17 +118,20 @@ export class CoursesService {
 
   /**
    * Chi tiết 1 khoá học cho user hiện tại.
-   * Lọc quyền xem theo:
-   *  - is_published = true
-   *  - allowed_roles has <role>
+   * User phải:
+   *  - Có role phù hợp allowed_roles
+   *  - ĐÃ được gán khoá (UserCourseAssignment)
    */
   async getCourseDetailForUser(courseId: string, userId: string, role: string) {
-    // chỉ lấy khoá học mà user có quyền xem
     const course = await this.prisma.course.findFirst({
       where: {
         id: courseId,
         is_published: true,
         allowed_roles: { has: role },
+        // 🔹 BẮT BUỘC: user phải được gán khoá
+        userAssignments: {
+          some: { user_id: userId },
+        },
       },
       select: {
         id: true,
@@ -158,27 +139,22 @@ export class CoursesService {
         description: true,
         category: true,
         is_required: true,
-
         lessons: {
           orderBy: { order_index: 'asc' },
           select: {
             id: true,
             title: true,
-            type: true, // 'video' | 'pdf' | 'slide' | 'text' ...
+            type: true,
             duration_seconds: true,
             is_mandatory: true,
             order_index: true,
             progresses: {
               where: { user_id: userId },
-              select: {
-                completed: true,
-                watched_seconds: true,
-              },
+              select: { completed: true, watched_seconds: true },
               take: 1,
             },
           },
         },
-
         userProgresses: {
           where: { user_id: userId },
           select: {
@@ -190,14 +166,11 @@ export class CoursesService {
       },
     });
 
+    // Không tìm thấy = hoặc khoá không tồn tại, hoặc user không được gán
     if (!course) {
-      // user không xem được (không có quyền hoặc khoá không tồn tại)
       return null;
     }
 
-    /**
-     * ----- Chuẩn hoá tiến độ tổng khoá -----
-     */
     const rawCourseProgress = course.userProgresses[0] ?? {
       completion_percent: 0,
       is_completed: false,
@@ -209,7 +182,6 @@ export class CoursesService {
       if (pctNum > 100) return 100;
       return Math.round(pctNum);
     })();
-
     const finished = safePct >= 100;
 
     const courseProgress = {
@@ -217,17 +189,14 @@ export class CoursesService {
       is_completed: finished,
     };
 
-    /**
-     * ----- Chuẩn hoá danh sách bài học -----
-     */
     const rawLessons = course.lessons.map((l) => {
-      const lp = l.progresses[0]; // progress của user cho bài này (nếu có)
+      const lp = l.progresses[0];
 
       return {
         id: l.id,
         order: l.order_index,
         title: l.title,
-        type: l.type, // ví dụ: 'video'
+        type: l.type,
         duration_minutes:
           typeof l.duration_seconds === 'number'
             ? Math.ceil(l.duration_seconds / 60)
@@ -239,7 +208,6 @@ export class CoursesService {
 
     const lessons = rawLessons.map((lesson, idx) => {
       if (idx === 0) {
-        // Bài đầu tiên luôn mở
         return {
           ...lesson,
           user_progress: {
@@ -249,7 +217,6 @@ export class CoursesService {
         };
       }
 
-      // Các bài sau: mở nếu bài trước đã completed
       const prevLesson = rawLessons[idx - 1];
       const prevDone = !!prevLesson.completed;
 
@@ -274,9 +241,7 @@ export class CoursesService {
   }
 
   /**
-   * Admin tạo khoá học mới.
-   * Dùng cho cả endpoint cũ (/courses/admin/courses) và mới (/admin/courses).
-   * Cho phép thiếu level / allowed_roles, sẽ gán default.
+   * Admin tạo khoá học mới
    */
   async createCourseForAdmin(adminUserId: string, body: CreateCourseDto) {
     const created = await this.prisma.course.create({
@@ -284,7 +249,7 @@ export class CoursesService {
         title: body.title,
         description: body.description ?? '',
         category: body.category ?? '',
-        level: body.level, // enum CourseLevel
+        level: (body.level as CourseLevel) ?? CourseLevel.Basic,
         is_required: body.is_required ?? false,
         is_published: body.is_published ?? false,
         allowed_roles: body.allowed_roles ?? ['user'],
@@ -317,9 +282,8 @@ export class CoursesService {
   }
 
   /**
-   * Admin xem danh sách khoá học (cho màn Admin → Quản lý khoá học)
+   * Admin xem danh sách khoá học (màn Admin → Quản lý khoá học)
    */
-
   async adminList(params: { page: number; pageSize: number }) {
     const { page, pageSize } = params;
 
@@ -348,10 +312,10 @@ export class CoursesService {
       title: c.title,
       description: c.description,
       category: c.category,
-      level: c.level, // <<– trả ra level
+      level: c.level,
       is_required: c.is_required,
       is_published: c.is_published,
-      allowed_roles: c.allowed_roles, // <<– trả ra allowed_roles
+      allowed_roles: c.allowed_roles,
       lessons_count: c.lessons.length,
     }));
 
@@ -360,6 +324,7 @@ export class CoursesService {
 
   /**
    * Gán khoá học cho user (bảng UserCourseAssignment)
+   * Chỉ cho phép nếu role của user nằm trong allowed_roles của khoá.
    */
   async assignUserToCourse(courseId: string, userId: string) {
     if (!courseId) {
@@ -369,20 +334,40 @@ export class CoursesService {
       throw new BadRequestException('userId is required');
     }
 
-    const course = await this.prisma.course.findUnique({
-      where: { id: courseId },
-      select: { id: true },
-    });
+    const [course, user] = await this.prisma.$transaction([
+      this.prisma.course.findUnique({
+        where: { id: courseId },
+        select: {
+          id: true,
+          title: true,
+          allowed_roles: true,
+        },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          full_name: true,
+          role: true,
+        },
+      }),
+    ]);
+
     if (!course) {
       throw new NotFoundException('Course không tồn tại');
     }
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true },
-    });
     if (!user) {
       throw new NotFoundException('User không tồn tại');
+    }
+
+    // 🔹 Nếu khoá có cấu hình allowed_roles và role user không nằm trong đó -> chặn
+    const allowedRoles = course.allowed_roles || [];
+    if (Array.isArray(allowedRoles) && allowedRoles.length > 0) {
+      if (!allowedRoles.includes(user.role)) {
+        throw new ForbiddenException(
+          `Role "${user.role}" không nằm trong allowed_roles của khoá này`,
+        );
+      }
     }
 
     const assignment = await this.prisma.userCourseAssignment.upsert({
@@ -401,6 +386,8 @@ export class CoursesService {
 
     return {
       message: 'Gán khoá học cho user thành công',
+      course,
+      user,
       assignment,
     };
   }
@@ -409,7 +396,14 @@ export class CoursesService {
    * Bỏ gán khoá học khỏi user
    */
   async unassignUserFromCourse(courseId: string, userId: string) {
-    await this.prisma.userCourseAssignment.deleteMany({
+    if (!courseId) {
+      throw new BadRequestException('courseId is required');
+    }
+    if (!userId) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const result = await this.prisma.userCourseAssignment.deleteMany({
       where: {
         user_id: userId,
         course_id: courseId,
@@ -418,7 +412,11 @@ export class CoursesService {
 
     return {
       success: true,
-      message: 'Gỡ gán khoá học thành công',
+      deleted: result.count,
+      message:
+        result.count > 0
+          ? 'Gỡ gán khoá học thành công'
+          : 'Không tìm thấy gán khoá học nào để gỡ',
     };
   }
 
@@ -440,7 +438,7 @@ export class CoursesService {
         title: body.title ?? existing.title,
         description: body.description ?? existing.description,
         category: body.category ?? existing.category,
-        level: body.level ?? existing.level,
+        level: (body.level as CourseLevel) ?? existing.level,
         is_required:
           typeof body.is_required === 'boolean'
             ? body.is_required
@@ -479,8 +477,6 @@ export class CoursesService {
     if (!existing) {
       throw new NotFoundException('Course không tồn tại');
     }
-
-    // Tuỳ ý: nếu muốn cứng hơn thì check lessons count trước khi xoá
 
     await this.prisma.course.delete({
       where: { id: courseId },

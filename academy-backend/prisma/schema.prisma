@@ -110,12 +110,18 @@ model Lesson {
 
   title       String
   type        LessonType
+
   // video
   video_url   String?
-  // pdf
+
+  // pdf (đang dùng sprint 1 – giữ nguyên)
   pdf_url     String?
   pdf_file_id String?
-  pdfFile     File?      @relation("Lesson_pdfFile", fields: [pdf_file_id], references: [id], onDelete: SetNull)
+  pdfFile     File? @relation("Lesson_pdfFile", fields: [pdf_file_id], references: [id], onDelete: SetNull)
+
+  // 🔹 File đính kèm chung (pptx, docx, zip…)
+  content_file_id String?
+  contentFile     File?  @relation("Lesson_contentFile", fields: [content_file_id], references: [id], onDelete: SetNull)
 
   duration_seconds Int      @default(0)
   order_index      Int      @default(1)
@@ -151,6 +157,9 @@ model File {
 
   // Opposite side of Lesson.pdfFile
   pdfLessons Lesson[] @relation("Lesson_pdfFile")
+
+	// 🔹 File đính kèm chung cho bài học
+  contentLessons Lesson[] @relation("Lesson_contentFile")
 
   @@index([uploaded_by])
   @@index([storage_provider])

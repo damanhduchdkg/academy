@@ -35,6 +35,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import SchoolIcon from "@mui/icons-material/School";
 
 import { authFetch } from "@/lib/authFetch";
 
@@ -51,6 +52,20 @@ type SnackbarState = {
   open: boolean;
   message: string;
   severity: "success" | "error" | "info" | "warning";
+};
+
+type SimpleCourse = {
+  id: string;
+  title: string;
+  allowed_roles: string[];
+};
+
+type AssignDialogState = {
+  open: boolean;
+  user: AdminUser | null;
+  courseId: string;
+  loading: boolean;
+  courses: SimpleCourse[];
 };
 
 export default function AdminUsersSection() {
@@ -323,6 +338,128 @@ export default function AdminUsersSection() {
     }
   };
 
+  // ========= GÁN KHOÁ HỌC =========
+  const [assignDialog, setAssignDialog] = useState<AssignDialogState>({
+    open: false,
+    user: null,
+    courseId: "",
+    loading: false,
+    courses: [],
+  });
+
+  const openAssignDialog = async (u: AdminUser) => {
+    try {
+      setAssignDialog((prev) => ({
+        ...prev,
+        open: true,
+        user: u,
+        loading: true,
+      }));
+
+      const res: any = await authFetch("/admin/courses", { method: "GET" });
+      let rows = (res && res.data) || res;
+      if (!Array.isArray(rows)) rows = [];
+
+      const userRole = (u.role as string) || "user";
+
+      // 🔹 Lọc khoá theo allowed_roles
+      const filtered = rows.filter((c: any) => {
+        const allowed: string[] = c.allowed_roles || [];
+        // Nếu không cấu hình allowed_roles hoặc mảng rỗng -> coi như mở cho mọi role
+        if (!Array.isArray(allowed) || allowed.length === 0) return true;
+        return allowed.includes(userRole);
+      });
+
+      if (filtered.length === 0) {
+        // Không có khoá phù hợp role user -> thông báo + set state
+        showSnackbar(
+          `Không có khoá học nào phù hợp role "${userRole}" của user này`,
+          "info"
+        );
+      }
+
+      const courses: SimpleCourse[] = filtered.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        allowed_roles: c.allowed_roles || [],
+      }));
+
+      setAssignDialog({
+        open: true,
+        user: u,
+        loading: false,
+        courses,
+        courseId: courses[0]?.id ?? "",
+      });
+    } catch (e) {
+      console.error(e);
+      showSnackbar("Không tải được danh sách khoá học", "error");
+      setAssignDialog({
+        open: false,
+        user: null,
+        loading: false,
+        courses: [],
+        courseId: "",
+      });
+    }
+  };
+
+  const handleCloseAssignDialog = () => {
+    setAssignDialog({
+      open: false,
+      user: null,
+      courseId: "",
+      loading: false,
+      courses: [],
+    });
+  };
+
+  const handleAssignCourse = async () => {
+    const { user, courseId } = assignDialog;
+    if (!user || !courseId) {
+      showSnackbar("Vui lòng chọn khoá học", "warning");
+      return;
+    }
+
+    try {
+      setAssignDialog((s) => ({ ...s, loading: true }));
+      await authFetch(`/admin/courses/${courseId}/assign-user`, {
+        method: "POST",
+        body: JSON.stringify({ userId: user.id }),
+      });
+      showSnackbar("Gán khoá học cho user thành công", "success");
+    } catch (e: any) {
+      console.error(e);
+      const msg =
+        e?.message ||
+        "Gán khoá học thất bại (có thể role của user không được phép học khoá này)";
+      showSnackbar(msg, "error");
+    } finally {
+      setAssignDialog((s) => ({ ...s, loading: false }));
+    }
+  };
+
+  const handleUnassignCourse = async () => {
+    const { user, courseId } = assignDialog;
+    if (!user || !courseId) {
+      showSnackbar("Vui lòng chọn khoá học", "warning");
+      return;
+    }
+
+    try {
+      setAssignDialog((s) => ({ ...s, loading: true }));
+      await authFetch(`/admin/courses/${courseId}/assign-user/${user.id}`, {
+        method: "DELETE",
+      });
+      showSnackbar("Gỡ khoá học khỏi user thành công", "success");
+    } catch (e) {
+      console.error(e);
+      showSnackbar("Gỡ khoá học thất bại", "error");
+    } finally {
+      setAssignDialog((s) => ({ ...s, loading: false }));
+    }
+  };
+
   // ========= UI =========
   return (
     <>
@@ -470,6 +607,15 @@ export default function AdminUsersSection() {
                               onClick={() => openDeleteDialog(u)}
                             >
                               <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="Gán khoá học">
+                            <IconButton
+                              size="small"
+                              onClick={() => openAssignDialog(u)}
+                            >
+                              <SchoolIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         </Stack>
@@ -785,6 +931,73 @@ export default function AdminUsersSection() {
               sx={{ textTransform: "none", fontWeight: 600 }}
             >
               {deleting ? "Đang xoá..." : "Xoá"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* ========== Dialog gán khoá học ========== */}
+        <Dialog
+          open={assignDialog.open}
+          onClose={() => !assignDialog.loading && handleCloseAssignDialog()}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>
+            Gán khoá học cho{" "}
+            {assignDialog.user ? `"${assignDialog.user.username}"` : ""}
+          </DialogTitle>
+          <DialogContent dividers>
+            {assignDialog.courses.length === 0 ? (
+              <Alert severity="info">
+                Chưa có khoá học nào hoặc không tải được danh sách khoá học.
+              </Alert>
+            ) : (
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <TextField
+                  label="Chọn khoá học"
+                  select
+                  fullWidth
+                  size="small"
+                  value={assignDialog.courseId}
+                  onChange={(e) =>
+                    setAssignDialog((s) => ({
+                      ...s,
+                      courseId: e.target.value,
+                    }))
+                  }
+                >
+                  {assignDialog.courses.map((c) => (
+                    <MenuItem key={c.id} value={c.id}>
+                      {c.title}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={handleCloseAssignDialog}
+              disabled={assignDialog.loading}
+              sx={{ textTransform: "none" }}
+            >
+              Đóng
+            </Button>
+            <Button
+              onClick={handleUnassignCourse}
+              disabled={assignDialog.loading}
+              color="warning"
+              sx={{ textTransform: "none", fontWeight: 600 }}
+            >
+              Gỡ khoá
+            </Button>
+            <Button
+              onClick={handleAssignCourse}
+              disabled={assignDialog.loading}
+              variant="contained"
+              sx={{ textTransform: "none", fontWeight: 600 }}
+            >
+              {assignDialog.loading ? "Đang xử lý..." : "Gán khoá"}
             </Button>
           </DialogActions>
         </Dialog>

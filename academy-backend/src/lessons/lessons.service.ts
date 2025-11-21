@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LessonType, Prisma } from '@prisma/client';
+import { AdminUpdateLessonDto } from '@/courses/dto/admin-lesson.dto';
 
 const LESSON_COMPLETE_THRESHOLD = 0.98; // >=98%
 const FINISH_EPSILON_SECONDS = 1.0; // nới 1s ở cuối video
@@ -120,45 +121,61 @@ export class LessonsService {
      * =========================
      * 0) NON-VIDEO (PDF/SLIDE/TEXT)
      * =========================
+     * Quy ước mới:
+     *  - pdfCurrentPage: trang đang đứng, luôn được lưu để F5 vào lại.
+     *  - pdfCompletedPages: số trang đã đủ 30s, CHỈ tăng khi FE chủ động gửi giá trị mới.
+     *  => BE tuyệt đối KHÔNG tự tăng completed = current.
      */
     if (lesson.type !== 'video') {
       const prevCompleted = prev?.pdfCompletedPages ?? 0;
       const prevTotal = prev?.pdfTotalPages ?? 0;
       const prevCurrent = prev?.pdfCurrentPage ?? 1;
 
-      // trang hiện tại FE đang đứng
+      // --------- dữ liệu FE gửi lên (nếu có) ----------
       const reqCurrent =
         typeof pdfCurrentPage === 'number' && pdfCurrentPage > 0
           ? Math.floor(pdfCurrentPage)
           : undefined;
 
-      // FE có thể gửi thêm số trang đã hoàn thành
       const reqCompleted =
         typeof pdfCompletedPages === 'number'
           ? Math.max(0, Math.floor(pdfCompletedPages))
           : undefined;
 
-      // tổng số trang
       const reqTotal =
         typeof pdfTotalPages === 'number'
           ? Math.max(0, Math.floor(pdfTotalPages))
           : undefined;
 
-      // => không bao giờ cho tụt
-      const nextTotal = Math.max(prevTotal, reqTotal ?? 0);
+      // --------- chuẩn hoá giá trị mới ----------
 
-      // completedPages không bao giờ < trang hiện tại và < giá trị cũ
-      const baseCompleted = Math.max(prevCompleted, reqCompleted ?? 0);
-      const nextCompleted =
-        reqCurrent !== undefined
-          ? Math.max(baseCompleted, reqCurrent)
-          : baseCompleted;
+      // Tổng trang: không bao giờ giảm
+      const newPdfTotal = Math.max(prevTotal, reqTotal ?? 0);
 
-      // currentPage cũng không được nhỏ hơn cái cũ
-      const nextCurrent =
-        reqCurrent !== undefined
-          ? Math.max(prevCurrent, reqCurrent)
-          : prevCurrent;
+      // Số trang hoàn thành:
+      //  - CHỈ cập nhật nếu FE gửi reqCompleted
+      //  - không nhỏ hơn lần trước
+      //  - không vượt quá total (nếu đã biết)
+      let newPdfCompleted = prevCompleted;
+      if (typeof reqCompleted === 'number') {
+        newPdfCompleted = Math.max(prevCompleted, reqCompleted);
+      }
+      if (newPdfTotal > 0) {
+        newPdfCompleted = Math.min(newPdfCompleted, newPdfTotal);
+      }
+
+      // Trang hiện tại:
+      //  - nếu FE gửi current thì mới tăng
+      //  - không nhỏ hơn lần trước
+      //  - không vượt quá total (nếu đã biết)
+      let newPdfCurrent = prevCurrent;
+      if (typeof reqCurrent === 'number') {
+        newPdfCurrent = Math.max(prevCurrent, reqCurrent);
+      }
+      if (newPdfTotal > 0) {
+        newPdfCurrent = Math.min(newPdfCurrent, newPdfTotal);
+      }
+      if (newPdfCurrent <= 0) newPdfCurrent = 1;
 
       const updated = await this.prisma.userLessonProgress.upsert({
         where: { user_id_lesson_id: { user_id: userId, lesson_id: lessonId } },
@@ -170,15 +187,15 @@ export class LessonsService {
           completed_at: prev?.completed_at ?? null,
           last_seen_at: new Date(),
           last_position_sec: 0,
-          pdfCompletedPages: nextCompleted,
-          pdfTotalPages: nextTotal,
-          pdfCurrentPage: nextCurrent,
+          pdfCompletedPages: newPdfCompleted,
+          pdfTotalPages: newPdfTotal,
+          pdfCurrentPage: newPdfCurrent,
         },
         update: {
           last_seen_at: new Date(),
-          pdfCompletedPages: nextCompleted,
-          pdfTotalPages: nextTotal,
-          pdfCurrentPage: nextCurrent,
+          pdfCompletedPages: newPdfCompleted,
+          pdfTotalPages: newPdfTotal,
+          pdfCurrentPage: newPdfCurrent,
         },
       });
 
@@ -206,10 +223,11 @@ export class LessonsService {
 
     /**
      * =========================
-     * 1) VIDEO – GIỮ NGUYÊN NHƯ CŨ
+     * 1) VIDEO – GIỮ NGUYÊN LOGIC SPRINT 1
      * =========================
      */
 
+    // Nếu bài đã completed rồi thì không update nữa
     if (prev?.completed) {
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
@@ -231,6 +249,7 @@ export class LessonsService {
       };
     }
 
+    // Nếu đã bị vi phạm thì không cho xem tiếp
     if (prev?.violated_at) {
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
@@ -678,6 +697,82 @@ export class LessonsService {
     return created;
   }
 
+  /** Admin cập nhật bài học */
+  async updateLessonForAdmin(lessonId: string, dto: AdminUpdateLessonDto) {
+    const existing = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    const updated = await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data: {
+        title: dto.title ?? existing.title,
+        type: (dto.type ?? existing.type) as LessonType,
+        duration_seconds:
+          typeof dto.duration_seconds === 'number'
+            ? dto.duration_seconds
+            : existing.duration_seconds,
+        is_mandatory:
+          typeof dto.is_mandatory === 'boolean'
+            ? dto.is_mandatory
+            : existing.is_mandatory,
+        order_index:
+          typeof dto.order_index === 'number'
+            ? dto.order_index
+            : existing.order_index,
+        video_url:
+          typeof dto.video_url !== 'undefined'
+            ? dto.video_url
+            : existing.video_url,
+        // pdf_url giữ như cũ hoặc cập nhật nếu dto có
+        // @ts-ignore
+        pdf_url:
+          typeof dto.pdf_url !== 'undefined'
+            ? dto.pdf_url
+            : (existing as any).pdf_url,
+      },
+      select: {
+        id: true,
+        course_id: true,
+        title: true,
+        type: true,
+        duration_seconds: true,
+        order_index: true,
+        is_mandatory: true,
+        video_url: true,
+        // @ts-ignore
+        pdf_url: true,
+      },
+    });
+
+    return updated;
+  }
+
+  /** Admin xoá bài học */
+  async deleteLessonForAdmin(lessonId: string) {
+    const existing = await this.prisma.lesson.findUnique({
+      where: { id: lessonId },
+      select: { id: true, title: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Lesson không tồn tại');
+    }
+
+    await this.prisma.lesson.delete({
+      where: { id: lessonId },
+    });
+
+    return {
+      success: true,
+      message: `Đã xoá bài học "${existing.title}"`,
+    };
+  }
+
   /** Tính lại % khoá học dựa trên các bài mandatory */
   private async recalcCourseProgress(args: {
     userId: string;
@@ -957,6 +1052,7 @@ export class LessonsService {
   }
 
   // LẤY DANH SÁCH BÀI HỌC CHO ADMIN
+  // LẤY DANH SÁCH BÀI HỌC CHO ADMIN
   async listLessonsForAdmin(params: {
     courseId?: string;
     search?: string;
@@ -1007,10 +1103,10 @@ export class LessonsService {
     ]);
 
     return {
-      items,
-      total,
       page,
       pageSize,
+      total,
+      data: items,
     };
   }
 }

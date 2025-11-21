@@ -89,6 +89,7 @@ export default function AdminCoursesSection() {
     message: "",
     severity: "success",
   });
+
   // ====== Confirm Delete Dialog ======
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -105,16 +106,7 @@ export default function AdminCoursesSection() {
     setSnackbar({ open: true, message: msg, severity: "success" });
   const showError = (msg: string) =>
     setSnackbar({ open: true, message: msg, severity: "error" });
-  const levelLabels: Record<CourseLevel, string> = {
-    Basic: "Cơ bản",
-    Advanced: "Nâng cao",
-  };
 
-  const roleLabels: Record<CourseRole, string> = {
-    admin: "Admin",
-    manager: "Quản lý",
-    user: "Nhân viên",
-  };
   // dialog thêm / sửa
   const [editOpen, setEditOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
@@ -198,9 +190,6 @@ export default function AdminCoursesSection() {
       is_required: form.is_required,
       is_published: form.is_published,
       allowed_roles: form.allowed_roles,
-      // nếu có level / allowed_roles thì thêm vào payload ở đây
-      // level: form.level,
-      // allowed_roles: form.allowed_roles,
     };
 
     try {
@@ -219,8 +208,6 @@ export default function AdminCoursesSection() {
       }
 
       setEditOpen(false);
-
-      // 🔥 Quan trọng: reload lại list từ BE để thấy data mới
       await loadCourses();
     } catch (e) {
       console.error(e);
@@ -276,6 +263,13 @@ export default function AdminCoursesSection() {
       console.error(e);
       showError("Không đổi được trạng thái khoá học");
     }
+  };
+
+  /* ====== MỞ TRANG BÀI HỌC CỦA KHOÁ ====== */
+  const handleOpenLessons = (courseId: string) => {
+    if (typeof window === "undefined") return;
+    // Dùng full reload giống sidebar admin để tránh bug navigate chậm / sai ID
+    window.location.href = `/admin/courses/${courseId}/lessons`;
   };
 
   /* ================== RENDER ================== */
@@ -349,6 +343,7 @@ export default function AdminCoursesSection() {
                 <TableCell>Áp dụng cho</TableCell>
                 <TableCell align="center">Số bài học</TableCell>
                 <TableCell align="center">Trạng thái</TableCell>
+                <TableCell align="center">Bài học</TableCell>
                 <TableCell align="right">Thao tác</TableCell>
               </TableRow>
             </TableHead>
@@ -359,19 +354,14 @@ export default function AdminCoursesSection() {
                   <TableCell>{course.title}</TableCell>
                   <TableCell>{course.category || "-"}</TableCell>
                   <TableCell>
-                    {/* CẤP ĐỘ */}
                     {course.level
                       ? levelLabels[course.level as CourseLevel]
                       : "-"}
                   </TableCell>
-
                   <TableCell>
-                    {/* LOẠI (Bắt buộc / Tuỳ chọn) */}
                     {course.is_required ? "Bắt buộc" : "Tuỳ chọn"}
                   </TableCell>
-
                   <TableCell>
-                    {/* ÁP DỤNG CHO */}
                     {course.allowed_roles && course.allowed_roles.length > 0
                       ? (course.allowed_roles as string[])
                           .map((r) => roleLabels[r as CourseRole] ?? r)
@@ -398,6 +388,30 @@ export default function AdminCoursesSection() {
                       onClick={() => handleToggleStatus(course)}
                     />
                   </TableCell>
+
+                  {/* NÚT BÀI HỌC */}
+                  <TableCell align="center">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleOpenLessons(course.id)}
+                      sx={{
+                        borderRadius: "999px",
+                        textTransform: "none",
+                        fontSize: "0.8rem",
+                        px: 0.5,
+                        py: 0.5,
+                        borderWidth: 1.5,
+                        "&:hover": {
+                          borderWidth: 1.5,
+                          backgroundColor: "rgba(2,0,107,0.06)",
+                        },
+                      }}
+                    >
+                      Bài học
+                    </Button>
+                  </TableCell>
+
                   <TableCell align="right">
                     <IconButton
                       size="small"
@@ -419,7 +433,7 @@ export default function AdminCoursesSection() {
 
               {courses.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={9}>
+                  <TableCell colSpan={10}>
                     <Typography
                       variant="body2"
                       sx={{ color: "text.secondary", textAlign: "center" }}
@@ -466,7 +480,6 @@ export default function AdminCoursesSection() {
               }
             />
 
-            {/* LEVEL */}
             <TextField
               label="Cấp độ"
               select
@@ -481,7 +494,6 @@ export default function AdminCoursesSection() {
               <MenuItem value="Advanced">Nâng cao</MenuItem>
             </TextField>
 
-            {/* LOẠI: bắt buộc / tuỳ chọn */}
             <TextField
               label="Loại"
               select
@@ -499,7 +511,6 @@ export default function AdminCoursesSection() {
               <MenuItem value="optional">Tuỳ chọn</MenuItem>
             </TextField>
 
-            {/* ÁP DỤNG CHO: allowed_roles */}
             <TextField
               label="Áp dụng cho"
               select
@@ -534,7 +545,6 @@ export default function AdminCoursesSection() {
               ))}
             </TextField>
 
-            {/* TRẠNG THÁI */}
             <TextField
               label="Trạng thái"
               select
@@ -576,6 +586,7 @@ export default function AdminCoursesSection() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
       {/* ======== CONFIRM DELETE DIALOG ======== */}
       <Dialog
         open={confirmDialog.open}

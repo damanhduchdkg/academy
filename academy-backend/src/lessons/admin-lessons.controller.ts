@@ -1,3 +1,4 @@
+// src/lessons/admin-lessons.controller.ts
 import {
   Body,
   Controller,
@@ -8,6 +9,7 @@ import {
   Query,
   Req,
   UseGuards,
+  Post,
 } from '@nestjs/common';
 import { LessonsService } from './lessons.service';
 import { AttachFileDto } from './dto/attach-file.dto';
@@ -15,8 +17,13 @@ import { AttachYoutubeDto } from './dto/attach-youtube.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '../auth/roles.enum';
+import { RolesGuard } from '../auth/roles.guard';
+import {
+  AdminCreateLessonDto,
+  AdminUpdateLessonDto,
+} from '../courses/dto/admin-lesson.dto';
 
-@UseGuards(AuthGuard('jwt')) // yêu cầu login
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('admin/lessons')
 export class AdminLessonsController {
   constructor(private readonly lessonsService: LessonsService) {}
@@ -41,16 +48,49 @@ export class AdminLessonsController {
   }
 
   /**
+   * Tạo bài học mới
+   * POST /admin/lessons
+   */
+  @Post()
+  @Roles(Role.admin, Role.manager)
+  async createLesson(@Body() dto: AdminCreateLessonDto) {
+    return this.lessonsService.createLessonForAdmin(dto);
+  }
+
+  /**
+   * Cập nhật bài học
+   * PATCH /admin/lessons/:id
+   */
+  @Patch(':id')
+  @Roles(Role.admin, Role.manager)
+  async updateLesson(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateLessonDto,
+  ) {
+    return this.lessonsService.updateLessonForAdmin(id, dto);
+  }
+
+  /**
+   * Xoá bài học
+   * DELETE /admin/lessons/:id
+   */
+  @Delete(':id')
+  @Roles(Role.admin, Role.manager)
+  async deleteLesson(@Param('id') id: string) {
+    return this.lessonsService.deleteLessonForAdmin(id);
+  }
+
+  /**
    * Gắn file (PDF / video) cho bài học
    * PATCH /admin/lessons/:id/attach-file
    * body: { "fileId": "..." }
    */
-
   @Patch(':id/attach-file')
+  @Roles(Role.admin, Role.manager)
   async attachFile(
     @Req() req: any,
     @Param('id') lessonId: string,
-    @Body() body: { fileId: string },
+    @Body() body: AttachFileDto,
   ) {
     const userId = req.user.user_id;
 
