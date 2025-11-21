@@ -79,6 +79,41 @@ type FileDialogState = {
   files: FileItem[];
 };
 
+// Format thời lượng video: 90s -> "01:30", 3661 -> "01:01:01"
+function formatVideoDuration(sec: number | null | undefined): string {
+  if (!sec || sec <= 0) return "-";
+
+  const total = Math.floor(sec);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+
+  const pad = (n: number) => n.toString().padStart(2, "0");
+
+  if (hours > 0) {
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+// Hiển thị cột "Thời lượng" theo loại bài
+function renderDurationCell(lesson: Lesson): string {
+  if (lesson.duration_seconds == null) return "-";
+
+  if (lesson.type === "video") {
+    return formatVideoDuration(lesson.duration_seconds);
+  }
+
+  // pdf / slide => số trang
+  if (lesson.type === "pdf" || lesson.type === "slide") {
+    if (lesson.duration_seconds <= 0) return "-";
+    return `${lesson.duration_seconds} trang`;
+  }
+
+  // text hoặc khác
+  return "-";
+}
+
 export default function AdminCourseLessonsSection({
   courseId,
 }: {
@@ -434,7 +469,7 @@ export default function AdminCourseLessonsSection({
                 <TableCell width={60}>Thứ tự</TableCell>
                 <TableCell>Tiêu đề</TableCell>
                 <TableCell>Loại</TableCell>
-                <TableCell align="center">Thời lượng (giây)</TableCell>
+                <TableCell align="center">Thời lượng / Số trang</TableCell>
                 <TableCell align="center">Bắt buộc</TableCell>
                 <TableCell align="right">Thao tác</TableCell>
               </TableRow>
@@ -446,7 +481,7 @@ export default function AdminCourseLessonsSection({
                   <TableCell>{lesson.title}</TableCell>
                   <TableCell>{lesson.type}</TableCell>
                   <TableCell align="center">
-                    {lesson.duration_seconds ?? "-"}
+                    {renderDurationCell(lesson)}
                   </TableCell>
                   <TableCell align="center">
                     {lesson.is_mandatory ? "Bắt buộc" : "Tuỳ chọn"}

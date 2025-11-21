@@ -6,6 +6,20 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { LessonType, Prisma } from '@prisma/client';
 import { AdminUpdateLessonDto } from '@/courses/dto/admin-lesson.dto';
+import * as fs from 'fs';
+import * as path from 'path';
+import ytdl from '@distube/ytdl-core';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import * as ffmpeg from 'fluent-ffmpeg';
+import ffprobeStatic from 'ffprobe-static';
+
+// Cấu hình ffprobe cho fluent-ffmpeg (dùng để đọc metadata nếu sau này cần)
+ffmpeg.setFfprobePath(ffprobeStatic.path);
+
+const execFileAsync = promisify(execFile);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse = require('pdf-parse');
 
 const LESSON_COMPLETE_THRESHOLD = 0.98; // >=98%
 const FINISH_EPSILON_SECONDS = 1.0; // nới 1s ở cuối video
@@ -54,7 +68,7 @@ export class LessonsService {
         last_position_sec: lp?.last_position_sec ?? 0,
         violated_at: lp?.violated_at ?? null,
         violation_reason: lp?.violation_reason ?? null,
-        // 👇 thêm 2 field cho PDF
+        // 👇 cho PDF
         pdfCompletedPages: (lp as any)?.pdfCompletedPages ?? 0,
         pdfTotalPages: (lp as any)?.pdfTotalPages ?? 0,
         pdfCurrentPage: lp?.pdfCurrentPage ?? 1,
@@ -121,17 +135,14 @@ export class LessonsService {
      * =========================
      * 0) NON-VIDEO (PDF/SLIDE/TEXT)
      * =========================
-     * Quy ước mới:
-     *  - pdfCurrentPage: trang đang đứng, luôn được lưu để F5 vào lại.
-     *  - pdfCompletedPages: số trang đã đủ 30s, CHỈ tăng khi FE chủ động gửi giá trị mới.
-     *  => BE tuyệt đối KHÔNG tự tăng completed = current.
+     * - pdfCurrentPage: trang đang đứng
+     * - pdfCompletedPages: số trang đã đủ 30s, CHỈ tăng khi FE gửi
      */
     if (lesson.type !== 'video') {
       const prevCompleted = prev?.pdfCompletedPages ?? 0;
       const prevTotal = prev?.pdfTotalPages ?? 0;
       const prevCurrent = prev?.pdfCurrentPage ?? 1;
 
-      // --------- dữ liệu FE gửi lên (nếu có) ----------
       const reqCurrent =
         typeof pdfCurrentPage === 'number' && pdfCurrentPage > 0
           ? Math.floor(pdfCurrentPage)
@@ -147,15 +158,8 @@ export class LessonsService {
           ? Math.max(0, Math.floor(pdfTotalPages))
           : undefined;
 
-      // --------- chuẩn hoá giá trị mới ----------
-
-      // Tổng trang: không bao giờ giảm
       const newPdfTotal = Math.max(prevTotal, reqTotal ?? 0);
 
-      // Số trang hoàn thành:
-      //  - CHỈ cập nhật nếu FE gửi reqCompleted
-      //  - không nhỏ hơn lần trước
-      //  - không vượt quá total (nếu đã biết)
       let newPdfCompleted = prevCompleted;
       if (typeof reqCompleted === 'number') {
         newPdfCompleted = Math.max(prevCompleted, reqCompleted);
@@ -164,10 +168,6 @@ export class LessonsService {
         newPdfCompleted = Math.min(newPdfCompleted, newPdfTotal);
       }
 
-      // Trang hiện tại:
-      //  - nếu FE gửi current thì mới tăng
-      //  - không nhỏ hơn lần trước
-      //  - không vượt quá total (nếu đã biết)
       let newPdfCurrent = prevCurrent;
       if (typeof reqCurrent === 'number') {
         newPdfCurrent = Math.max(prevCurrent, reqCurrent);
@@ -223,7 +223,7 @@ export class LessonsService {
 
     /**
      * =========================
-     * 1) VIDEO – GIỮ NGUYÊN LOGIC SPRINT 1
+     * 1) VIDEO – giữ nguyên logic cũ
      * =========================
      */
 
@@ -350,6 +350,7 @@ export class LessonsService {
       courseProgress,
     };
   }
+
   /** PATCH /lessons/:lessonId/finalize */
   async finalizeLesson(args: {
     userId: string;
@@ -468,8 +469,6 @@ export class LessonsService {
         completed_at: completed ? new Date() : null,
         last_seen_at: new Date(),
         last_position_sec: Math.floor(lastPositionSec),
-        // pdfCompletedPages: prev?.pdfCompletedPages ?? 0,
-        // pdfTotalPages: prev?.pdfTotalPages ?? 0,
       },
       update: {
         watched_seconds: newWatched,
@@ -494,14 +493,12 @@ export class LessonsService {
         completed: updated.completed,
         completed_at: updated.completed_at,
         last_position_sec: updated.last_position_sec,
-        // pdfCompletedPages: (updated as any).pdfCompletedPages ?? 0,
-        // pdfTotalPages: (updated as any).pdfTotalPages ?? 0,
       },
       courseProgress,
     };
   }
 
-  /** MARK violation (video only, giữ nguyên như trước) */
+  /** MARK violation (video only) */
   async markViolation(args: {
     userId: string;
     userRole: string;
@@ -598,7 +595,7 @@ export class LessonsService {
     };
   }
 
-  /** Chuẩn hoá metadata cho FE – GIỜ đã có pdf_url trong DB */
+  /** Chuẩn hoá metadata cho FE */
   private buildLessonMeta(lesson: any) {
     const origin = process.env.BACKEND_PUBLIC_ORIGIN || 'http://localhost:3000';
 
@@ -617,7 +614,6 @@ export class LessonsService {
       }
     }
 
-    // nếu là PDF mà chưa có pdf_url, build từ pdf_file_id
     if (lesson.type === 'pdf' && !pdf_url) {
       const fid = lesson.pdf_file_id ?? null;
       if (fid) pdf_url = `${origin}/files/${fid}`;
@@ -797,7 +793,7 @@ export class LessonsService {
     }
 
     const mandatoryIds = course.lessons
-      // .filter((l) => l.is_mandatory) //lọc khoá bắt buộc
+      // .filter((l) => l.is_mandatory)
       .map((l) => l.id);
 
     let completionPercent = 0;
@@ -847,28 +843,83 @@ export class LessonsService {
     };
   }
 
+  /** LẤY ABS PATH FILE LOCAL TRONG uploads/ */
+  private resolveLocalFilePath(file: {
+    storage_provider: string;
+    storage_key: string | null;
+  }): string | null {
+    if (!file || file.storage_provider !== 'local' || !file.storage_key) {
+      return null;
+    }
+
+    let rel = path.normalize(file.storage_key).replace(/^([/\\])+/g, '');
+    if (rel.startsWith('..')) return null;
+
+    const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+    const abs = path.resolve(uploadsRoot, rel);
+    if (!abs.startsWith(uploadsRoot)) return null;
+    if (!fs.existsSync(abs)) return null;
+
+    return abs;
+  }
+
+  /** Đếm số trang PDF bằng regex trên nội dung file */
+  private estimatePdfPages(absPath: string): number | null {
+    try {
+      const buf = fs.readFileSync(absPath);
+      const text = buf.toString('latin1');
+      const matches = text.match(/\/Type\s*\/Page\b/g);
+      if (!matches) return null;
+      const pages = matches.length;
+      return pages > 0 ? pages : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Dùng ffprobe-static để lấy duration video (giây) */
+  private async estimateVideoDurationSeconds(
+    absPath: string,
+  ): Promise<number | null> {
+    try {
+      const { stdout } = await execFileAsync(ffprobeStatic.path, [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        absPath,
+      ]);
+      const sec = parseFloat(stdout.trim());
+      if (!isFinite(sec) || sec <= 0) return null;
+      return Math.floor(sec);
+    } catch (e) {
+      console.warn('ffprobe duration error:', e);
+      return null;
+    }
+  }
+
   /**
    * Gắn 1 File (PDF/Video) vào bài học.
-   * - Nếu type = 'pdf' -> set pdf_file_id + pdf_url
-   * - Nếu type = 'video' -> set video_url = file.public_url
+   * - pdf/slide → set pdf_file_id + pdf_url + duration_seconds = số trang
+   * - video (file local) → set video_url + duration_seconds = tổng giây
    */
   async attachFileToLesson(params: {
     lessonId: string;
     fileId: string;
-    userId: string; // để sau này nếu muốn ghi log ai là người gán file
+    userId: string;
   }) {
     const { lessonId, fileId, userId } = params;
 
-    // 1. Check lesson
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true, type: true, title: true },
+      select: { id: true, type: true, title: true, duration_seconds: true },
     });
     if (!lesson) {
       throw new NotFoundException('Lesson không tồn tại');
     }
 
-    // 2. Check file
     const file = await this.prisma.file.findUnique({
       where: { id: fileId },
       select: {
@@ -877,71 +928,81 @@ export class LessonsService {
         mime_type: true,
         public_url: true,
         is_active: true,
+        storage_provider: true,
+        storage_key: true,
       },
     });
     if (!file || !file.is_active) {
       throw new NotFoundException('File không tồn tại hoặc đã bị vô hiệu');
     }
 
-    // URL dùng cho FE:
-    // - Nếu là link ngoài: dùng public_url
-    // - Nếu là file nội bộ (upload): dùng /files/:fileId
     const fileUrl = file.public_url ?? `/files/${file.id}`;
 
-    let updated;
+    let autoDuration: number | null = null;
+    const absPath = this.resolveLocalFilePath({
+      storage_provider: file.storage_provider,
+      storage_key: file.storage_key,
+    });
 
-    // 3. Tuỳ theo type bài học mà set field phù hợp
-    if (lesson.type === LessonType.pdf) {
-      updated = await this.prisma.lesson.update({
-        where: { id: lessonId },
-        data: {
-          pdf_file_id: file.id,
-          pdf_url: fileUrl,
-        },
-        select: {
-          id: true,
-          title: true,
-          type: true,
-          pdf_file_id: true,
-          pdf_url: true,
-          video_url: true,
-        },
-      });
-    } else if (lesson.type === LessonType.video) {
-      updated = await this.prisma.lesson.update({
-        where: { id: lessonId },
-        data: {
-          video_url: fileUrl,
-        },
-        select: {
-          id: true,
-          title: true,
-          type: true,
-          pdf_file_id: true,
-          pdf_url: true,
-          video_url: true,
-        },
-      });
-    } else {
-      // Các type khác (slide/text) tạm thời gán như PDF
-      updated = await this.prisma.lesson.update({
-        where: { id: lessonId },
-        data: {
-          pdf_file_id: file.id,
-          pdf_url: fileUrl,
-        },
-        select: {
-          id: true,
-          title: true,
-          type: true,
-          pdf_file_id: true,
-          pdf_url: true,
-          video_url: true,
-        },
-      });
+    if (absPath) {
+      const mime = (file.mime_type || '').toLowerCase();
+
+      if (
+        lesson.type === LessonType.pdf ||
+        lesson.type === LessonType.slide ||
+        mime === 'application/pdf'
+      ) {
+        const pages = this.estimatePdfPages(absPath);
+        if (pages && pages > 0) autoDuration = pages;
+      } else if (
+        lesson.type === LessonType.video &&
+        mime.startsWith('video/')
+      ) {
+        const secs = await this.estimateVideoDurationSeconds(absPath);
+        if (secs && secs > 0) autoDuration = secs;
+      }
     }
 
-    // 4. (Tuỳ chọn) ghi activity log – nếu anh muốn sau này tra audit
+    // 👇 dùng UncheckedUpdateInput để set trực tiếp pdf_file_id
+    let data: Prisma.LessonUncheckedUpdateInput;
+
+    if (lesson.type === LessonType.pdf || lesson.type === LessonType.slide) {
+      data = {
+        pdf_file_id: file.id,
+        pdf_url: fileUrl,
+      };
+    } else if (lesson.type === LessonType.video) {
+      data = {
+        video_url: fileUrl,
+      };
+    } else {
+      data = {
+        pdf_file_id: file.id,
+        pdf_url: fileUrl,
+      };
+    }
+
+    if (typeof autoDuration === 'number') {
+      data.duration_seconds = autoDuration;
+    }
+
+    const updated = await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data,
+      select: {
+        id: true,
+        course_id: true,
+        title: true,
+        type: true,
+        duration_seconds: true,
+        order_index: true,
+        is_mandatory: true,
+        pdf_file_id: true,
+        pdf_url: true,
+        video_url: true,
+      },
+    });
+
     await this.prisma.activityLog.create({
       data: {
         user_id: userId,
@@ -971,7 +1032,6 @@ export class LessonsService {
       data.pdf_file_id = null;
       data.pdf_url = null;
     } else if (lesson.type === LessonType.video) {
-      // nếu video đang dùng file mp4 thì gỡ link file
       data.video_url = null;
     } else {
       data.pdf_file_id = null;
@@ -995,6 +1055,7 @@ export class LessonsService {
 
   /**
    * Gắn link YouTube cho bài học (thường type = 'video').
+   * NEW: luôn cố gắng lấy lại thời lượng từ YouTube và cập nhật duration_seconds.
    */
   async attachYoutubeToLesson(params: {
     lessonId: string;
@@ -1004,25 +1065,57 @@ export class LessonsService {
 
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true },
+      select: {
+        id: true,
+        type: true,
+        duration_seconds: true,
+        video_url: true,
+      },
     });
+
     if (!lesson) {
       throw new NotFoundException('Lesson không tồn tại');
     }
 
-    // (Nếu cần, anh có thể normalize url tại đây)
+    let newDuration = 0;
+
+    // Luôn cố gắng đọc lại thời lượng từ link mới
+    try {
+      if (ytdl.validateURL(youtubeUrl)) {
+        const info = await ytdl.getInfo(youtubeUrl);
+        const len = parseInt(info.videoDetails.lengthSeconds || '0', 10);
+        if (Number.isFinite(len) && len > 0) {
+          newDuration = len;
+        }
+      }
+    } catch (e) {
+      console.warn(
+        'Cannot fetch YouTube duration, keep duration_seconds as is',
+        e,
+      );
+    }
+
+    const data: any = {
+      video_url: youtubeUrl,
+    };
+
+    // Nếu lấy được duration hợp lệ thì luôn ghi đè
+    if (newDuration > 0) {
+      data.duration_seconds = newDuration;
+    }
+
     const updated = await this.prisma.lesson.update({
       where: { id: lessonId },
-      data: {
-        video_url: youtubeUrl,
-      },
+      data,
       select: {
         id: true,
         title: true,
         type: true,
         video_url: true,
+        duration_seconds: true,
       },
     });
+
     return updated;
   }
 
@@ -1051,7 +1144,6 @@ export class LessonsService {
     return updated;
   }
 
-  // LẤY DANH SÁCH BÀI HỌC CHO ADMIN
   // LẤY DANH SÁCH BÀI HỌC CHO ADMIN
   async listLessonsForAdmin(params: {
     courseId?: string;
