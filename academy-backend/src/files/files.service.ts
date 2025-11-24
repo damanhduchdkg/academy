@@ -3,11 +3,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Service này chỉ là ví dụ. Bạn cần sửa theo cách thật sự bạn lưu file:
- * - Nếu bạn lưu file trong S3 => ở đây sẽ generate signed URL S3 thay vì đọc fs.
- * - Nếu bạn lưu file local => đọc từ ổ đĩa rồi stream ra.
- */
 @Injectable()
 export class FilesService {
   constructor(private prisma: PrismaService) {}
@@ -23,9 +18,7 @@ export class FilesService {
   }
 
   /**
-   * Ví dụ nếu bạn đang lưu file thật trong thư mục ./uploads/<storage_path>
-   * và muốn stream nó về response (video/pdf/...).
-   * Nếu bạn dùng S3 thì thay logic này = generate signed URL rồi trả redirect.
+   * Nếu bạn đang lưu file thật trong thư mục ./uploads/<storage_path>
    */
   createLocalFileStream(storagePath: string) {
     const absPath = path.resolve(process.cwd(), 'uploads', storagePath);
@@ -34,6 +27,7 @@ export class FilesService {
     }
     return fs.createReadStream(absPath);
   }
+
   // Đăng ký metadata file (admin upload thủ công hoặc link có sẵn)
   async registerFile(params: {
     uploaderId: string;
@@ -93,6 +87,47 @@ export class FilesService {
       },
     });
     return { ok: true };
+  }
+
+  // Admin cập nhật file: đổi tên / đổi trạng thái (active / inactive)
+  async adminUpdateFile(params: {
+    id: string;
+    fileName?: string;
+    isActive?: boolean;
+  }) {
+    const { id, fileName, isActive } = params;
+
+    const existing = await this.prisma.file.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('File không tồn tại');
+    }
+
+    const data: any = {};
+    if (typeof fileName === 'string' && fileName.trim() !== '') {
+      data.file_name = fileName.trim();
+    }
+    if (typeof isActive === 'boolean') {
+      data.is_active = isActive;
+    }
+
+    const updated = await this.prisma.file.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        file_name: true,
+        mime_type: true,
+        public_url: true,
+        byte_size: true,
+        is_active: true,
+        created_at: true,
+      },
+    });
+
+    return updated;
   }
 
   async adminList(params: { page: number; pageSize: number }) {

@@ -57,3 +57,7 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 /generated/prisma
+
+
+# Ignore anything YouTube injects
+*player-script.js

@@ -205,25 +205,30 @@ export default function LessonPage() {
   React.useEffect(() => {
     if (violated || progress?.completed || !lessonId) return;
 
+    const isPdfLesson = meta?.type === "pdf";
+
+    // ✅ Dùng chung cho: ẩn tab, unmount (đổi route, đóng lesson)
+    const flush = () => {
+      authFetch(`/lessons/${lessonId}/progress`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          watchedSeconds: Math.floor(watchedRef.current),
+          lastPositionSec: Math.floor(posRef.current),
+          pdfCompletedPages: isPdfLesson ? pdfCompletedPages : undefined,
+          pdfTotalPages: isPdfLesson ? pdfTotalPages : undefined,
+          pdfCurrentPage: isPdfLesson ? pdfCurrentPage : undefined,
+        }),
+      }).catch(() => {});
+    };
+
     const onVis = () => {
       if (document.visibilityState === "hidden") {
-        const isPdfLesson = meta?.type === "pdf";
-        authFetch(`/lessons/${lessonId}/progress`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            watchedSeconds: Math.floor(watchedRef.current),
-            lastPositionSec: Math.floor(posRef.current),
-            pdfCompletedPages: isPdfLesson ? pdfCompletedPages : undefined,
-            pdfTotalPages: isPdfLesson ? pdfTotalPages : undefined,
-            pdfCurrentPage: isPdfLesson ? pdfCurrentPage : undefined,
-          }),
-        }).catch(() => {});
+        flush();
       }
     };
 
     const onUnload = () => {
       try {
-        const isPdfLesson = meta?.type === "pdf";
         const payload: any = {
           watchedSeconds: Math.floor(watchedRef.current),
           lastPositionSec: Math.floor(posRef.current),
@@ -242,9 +247,12 @@ export default function LessonPage() {
 
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("beforeunload", onUnload);
+
     return () => {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("beforeunload", onUnload);
+      // ✅ QUAN TRỌNG: khi component bị unmount (chuyển trang)
+      flush();
     };
   }, [
     lessonId,
@@ -284,7 +292,7 @@ export default function LessonPage() {
       } catch {}
       try {
         await authFetch(`/lessons/${lessonId}/violation`, {
-          method: "PATCH",
+          method: "POST",
           body: JSON.stringify({ reason: kind, reset: true, coverage: extras }),
         });
       } catch {}
@@ -363,6 +371,7 @@ export default function LessonPage() {
           <LessonContentViewer
             type={meta.type as any}
             youtubeUrl={meta.youtube_url ?? null}
+            videoUrl={meta.video_url}
             pdfUrl={safePdfUrl}
             durationSeconds={meta.duration_seconds ?? 0}
             resumeFromSeconds={progress?.last_position_sec || 0}

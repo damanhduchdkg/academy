@@ -3,30 +3,46 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(bodyParser.json({ limit: '100mb' }));
+  app.use(
+    bodyParser.urlencoded({
+      limit: '100mb',
+      extended: true,
+    }),
+  );
 
   // CORS dev LAN
   app.enableCors({
     origin: true,
     credentials: true,
-    methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
-      'Content-Type','Authorization','Accept','X-Requested-With','cache-control','pragma'
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'X-Requested-With',
+      'cache-control',
+      'pragma',
     ],
     maxAge: 600,
   });
 
   // Helmet: tắt mọi thứ có thể chặn iframe / cross-origin
-  app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    frameguard: false, // <-- tắt X-Frame-Options
-    hsts: false,
-  }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      frameguard: false, // <-- tắt X-Frame-Options
+      hsts: false,
+    }),
+  );
 
   // Xoá/ghi đè thêm vài header cho chắc (dev)
   app.use((req, res, next) => {
@@ -38,12 +54,14 @@ async function bootstrap() {
     next();
   });
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-    transformOptions: { enableImplicitConversion: true },
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
 
   await app.listen(3000, '0.0.0.0');
 }

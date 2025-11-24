@@ -595,28 +595,44 @@ export class LessonsService {
     };
   }
 
-  /** Chuẩn hoá metadata cho FE */
+  /** Chuẩn hoá metadata cho FE – GIỜ đã có pdf_url + video_url tuyệt đối */
   private buildLessonMeta(lesson: any) {
     const origin = process.env.BACKEND_PUBLIC_ORIGIN || 'http://localhost:3000';
 
     let youtube_url: string | null = null;
     let direct_video_url: string | null = null;
-    let pdf_url: string | null = lesson.pdf_url ?? null;
 
+    // ---- PDF URL: chuẩn hoá thành absolute URL nếu cần ----
+    let pdf_url: string | null = lesson.pdf_url ?? null;
+    if (pdf_url) {
+      const isAbs = /^https?:\/\//i.test(pdf_url);
+      if (!isAbs) {
+        pdf_url = `${origin}${pdf_url}`;
+      }
+    }
+
+    // ---- VIDEO URL: tách youtube / file mp4 ----
     const rawVideo = lesson.video_url as string | null;
 
     if (rawVideo) {
       const lower = rawVideo.toLowerCase();
+
+      // Link youtube
       if (lower.includes('youtube.com') || lower.includes('youtu.be')) {
         youtube_url = rawVideo;
       } else {
-        direct_video_url = rawVideo;
+        // File mp4 hoặc các loại video khác (thường là "/files/:id")
+        const isAbsVideo = /^https?:\/\//i.test(rawVideo);
+        direct_video_url = isAbsVideo ? rawVideo : `${origin}${rawVideo}`;
       }
     }
 
+    // Nếu là PDF mà vẫn chưa có pdf_url thì fallback từ pdf_file_id
     if (lesson.type === 'pdf' && !pdf_url) {
       const fid = lesson.pdf_file_id ?? null;
-      if (fid) pdf_url = `${origin}/files/${fid}`;
+      if (fid) {
+        pdf_url = `${origin}/files/${fid}`;
+      }
     }
 
     return {
@@ -625,9 +641,12 @@ export class LessonsService {
       is_mandatory: lesson.is_mandatory,
       type: lesson.type,
       duration_seconds: lesson.duration_seconds ?? 0,
-      video_url: direct_video_url,
-      youtube_url,
-      pdf_url,
+
+      // FE dùng:
+      video_url: direct_video_url, // mp4/file
+      youtube_url, // youtube
+      pdf_url, // pdf viewer
+
       slide_url: null,
       text_content:
         lesson.type === 'text'
@@ -690,6 +709,8 @@ export class LessonsService {
         created_at: true,
       },
     });
+    // 🔁 Sau khi thêm bài mới, tính lại % khoá cho tất cả user đã có tiến độ
+    await this.recalcCourseProgressForAllUsers(created.course_id);
     return created;
   }
 
@@ -707,6 +728,7 @@ export class LessonsService {
       where: { id: lessonId },
       data: {
         title: dto.title ?? existing.title,
+        course_id: dto.course_id ?? existing.course_id,
         type: (dto.type ?? existing.type) as LessonType,
         duration_seconds:
           typeof dto.duration_seconds === 'number'
@@ -841,6 +863,36 @@ export class LessonsService {
         completed_at: up.completed_at,
       },
     };
+  }
+
+  /**
+   * Khi thêm/sửa cấu trúc khoá học: tính lại % cho TẤT CẢ user đã có tiến độ trong khoá.
+   * Gọi sau khi thêm bài học mới, đổi mandatory, v.v.
+   */
+  private async recalcCourseProgressForAllUsers(courseId: string) {
+    // 1) Những user đã có bản ghi user_course_progress
+    const courseProgressRows = await this.prisma.userCourseProgress.findMany({
+      where: { course_id: courseId },
+      select: { user_id: true },
+    });
+
+    // 2) Những user đã có progress ở bất kỳ bài học nào trong khoá (nhưng có thể chưa có user_course_progress)
+    const lessonProgressRows = await this.prisma.userLessonProgress.findMany({
+      where: {
+        lesson: { course_id: courseId }, // dùng relation lesson -> course
+      },
+      select: { user_id: true },
+    });
+
+    // Gộp & loại trùng user_id
+    const userIds = new Set<string>();
+    for (const r of courseProgressRows) userIds.add(r.user_id);
+    for (const r of lessonProgressRows) userIds.add(r.user_id);
+
+    // Chạy recalc cho từng user
+    for (const userId of userIds) {
+      await this.recalcCourseProgress({ userId, courseId });
+    }
   }
 
   /** LẤY ABS PATH FILE LOCAL TRONG uploads/ */
@@ -1044,6 +1096,7 @@ export class LessonsService {
       select: {
         id: true,
         title: true,
+        course_id: true,
         type: true,
         pdf_file_id: true,
         pdf_url: true,
@@ -1110,6 +1163,7 @@ export class LessonsService {
       select: {
         id: true,
         title: true,
+        course_id: true,
         type: true,
         video_url: true,
         duration_seconds: true,
@@ -1137,6 +1191,7 @@ export class LessonsService {
       select: {
         id: true,
         title: true,
+        course_id: true,
         type: true,
         video_url: true,
       },

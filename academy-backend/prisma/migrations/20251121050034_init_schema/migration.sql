@@ -52,13 +52,45 @@ ADD COLUMN     "storage_provider" TEXT NOT NULL;
 
 -- AlterTable
 ALTER TABLE "Lesson" DROP COLUMN "file_id",
+ADD COLUMN     "content_file_id" TEXT,
 ADD COLUMN     "pdf_file_id" TEXT,
+ADD COLUMN     "pdf_url" TEXT,
+ADD COLUMN     "video_url" TEXT,
 ALTER COLUMN "duration_seconds" SET DEFAULT 0,
 ALTER COLUMN "order_index" SET DEFAULT 1,
 ALTER COLUMN "updated_at" DROP DEFAULT;
 
 -- AlterTable
-ALTER TABLE "UserLessonProgress" ALTER COLUMN "coverage_json" DROP DEFAULT;
+ALTER TABLE "User" ALTER COLUMN "role" SET DEFAULT 'user';
+
+-- AlterTable
+ALTER TABLE "UserLessonProgress" ADD COLUMN     "coverage_json" JSONB,
+ADD COLUMN     "last_hb_at" TIMESTAMP(3),
+ADD COLUMN     "last_position_sec" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "pdfCompletedPages" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "pdfCurrentPage" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN     "pdfTotalPages" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "violated_at" TIMESTAMP(3),
+ADD COLUMN     "violation_reason" TEXT;
+
+-- CreateTable
+CREATE TABLE "UserCourseAssignment" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "course_id" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserCourseAssignment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "UserCourseAssignment_user_id_idx" ON "UserCourseAssignment"("user_id");
+
+-- CreateIndex
+CREATE INDEX "UserCourseAssignment_course_id_idx" ON "UserCourseAssignment"("course_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "UserCourseAssignment_user_id_course_id_key" ON "UserCourseAssignment"("user_id", "course_id");
 
 -- CreateIndex
 CREATE INDEX "ActivityLog_user_id_idx" ON "ActivityLog"("user_id");
@@ -127,6 +159,9 @@ ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_course_id_fkey" FOREIGN KEY ("course
 ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_pdf_file_id_fkey" FOREIGN KEY ("pdf_file_id") REFERENCES "File"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Lesson" ADD CONSTRAINT "Lesson_content_file_id_fkey" FOREIGN KEY ("content_file_id") REFERENCES "File"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "File" ADD CONSTRAINT "File_uploaded_by_fkey" FOREIGN KEY ("uploaded_by") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -140,3 +175,9 @@ ALTER TABLE "UserCourseProgress" ADD CONSTRAINT "UserCourseProgress_user_id_fkey
 
 -- AddForeignKey
 ALTER TABLE "UserCourseProgress" ADD CONSTRAINT "UserCourseProgress_course_id_fkey" FOREIGN KEY ("course_id") REFERENCES "Course"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserCourseAssignment" ADD CONSTRAINT "UserCourseAssignment_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserCourseAssignment" ADD CONSTRAINT "UserCourseAssignment_course_id_fkey" FOREIGN KEY ("course_id") REFERENCES "Course"("id") ON DELETE CASCADE ON UPDATE CASCADE;

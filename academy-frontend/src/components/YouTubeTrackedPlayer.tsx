@@ -53,11 +53,11 @@ function extractVid(url: string): string | null {
 }
 
 // (tuỳ chọn) tạo resume key nếu muốn lưu/đọc localStorage ở đây
-function makeResumeKey(ns?: string, url?: string) {
-  if (!ns || !url) return null;
-  const v = extractVid(url);
-  return v ? `yt_resume_${ns}_${v}` : null;
-}
+// function makeResumeKey(ns?: string, url?: string) {
+//   if (!ns || !url) return null;
+//   const v = extractVid(url);
+//   return v ? `yt_resume_${ns}_${v}` : null;
+// }
 
 let ytReadyPromise: Promise<any> | null = null;
 function loadYT(): Promise<any> {
@@ -125,16 +125,16 @@ export default function YouTubeTrackedPlayer({
     lastRateRef.current = rate || 1;
   }, []);
 
-  const maybeSaveResume = React.useCallback((pos: number) => {
-    const key = resumeKeyRef.current;
-    if (!key) return;
-    const now = performance.now();
-    if (now - lastSaveTS.current < 12000) return;
-    lastSaveTS.current = now;
-    try {
-      localStorage.setItem(key, String(Math.floor(pos)));
-    } catch {}
-  }, []);
+  // const maybeSaveResume = React.useCallback((pos: number) => {
+  //   const key = resumeKeyRef.current;
+  //   if (!key) return;
+  //   const now = performance.now();
+  //   if (now - lastSaveTS.current < 12000) return;
+  //   lastSaveTS.current = now;
+  //   try {
+  //     localStorage.setItem(key, String(Math.floor(pos)));
+  //   } catch {}
+  // }, []);
 
   const signalViolation = React.useCallback(
     (kind: "seek" | "rate" | "both", extras?: any) => {
@@ -189,20 +189,25 @@ export default function YouTubeTrackedPlayer({
         return;
       }
 
-      // nếu disableGuards: không đếm tiến trình, chỉ duy trì baseline mượt
       if (disableGuards) {
+        // bài đã hoàn thành: không đếm tiến trình, chỉ cập nhật baseline
         setBaseline(cur, 1);
       } else {
-        const wall = (performance.now() - lastNowRef.current) / 1000;
-        const delta = Math.max(0, Math.min(cur - lastCurRef.current, wall));
-        if (delta > 0) {
+        // ✅ ĐẾM THEO THỜI GIAN THỰC CỦA VIDEO: currentTime chênh lệch so với lần trước
+        const rawDelta = cur - lastCurRef.current;
+
+        if (rawDelta > 0) {
           try {
-            onValidWatchTick?.(delta, cur);
+            onValidWatchTick?.(rawDelta, cur);
           } catch {}
-          maybeSaveResume(cur);
+
+          // cập nhật baseline cho lần tick sau
           setBaseline(cur, 1);
         } else {
-          if (cur < lastCurRef.current - JITTER) setBaseline(cur, 1);
+          // nếu nhảy lùi nhiều thì reset baseline để khỏi bị âm
+          if (cur < lastCurRef.current - JITTER) {
+            setBaseline(cur, 1);
+          }
         }
       }
     }
@@ -222,12 +227,12 @@ export default function YouTubeTrackedPlayer({
     setBaseline,
     signalViolation,
     disableGuards,
-    maybeSaveResume,
+    // maybeSaveResume,
   ]);
 
-  React.useEffect(() => {
-    resumeKeyRef.current = makeResumeKey(storageNamespace, youtubeUrl);
-  }, [storageNamespace, youtubeUrl]);
+  // React.useEffect(() => {
+  //   resumeKeyRef.current = makeResumeKey(storageNamespace, youtubeUrl);
+  // }, [storageNamespace, youtubeUrl]);
 
   React.useEffect(() => {
     let destroyed = false;

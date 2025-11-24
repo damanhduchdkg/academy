@@ -6,6 +6,7 @@ import YouTubeTrackedPlayer, {
 } from "./YouTubeTrackedPlayer";
 import dynamic from "next/dynamic";
 import { authFetch } from "@/lib/authFetch";
+import LocalVideoTrackedPlayer from "./LocalVideoTrackedPlayer";
 
 const PdfTrackedViewer = dynamic(() => import("./PdfTrackedViewer"), {
   ssr: false,
@@ -31,12 +32,13 @@ export default function LessonContentViewer(props: {
   type?: LessonContentType;
 
   // VIDEO
-  youtubeUrl?: string | null;
+  youtubeUrl?: string | null; // link YouTube
+  videoUrl?: string | null; // link mp4 nội bộ (hoặc http(s) khác)
 
   // PDF (embed)
   pdfUrl?: string | null;
 
-  // Dùng cho PDF/video nếu cần
+  // Dùng cho VIDEO/PDF nếu cần
   durationSeconds?: number | null;
 
   // Dùng chung
@@ -48,7 +50,7 @@ export default function LessonContentViewer(props: {
   /** Bài đã 100% → tắt guard video/PDF */
   disableGuards?: boolean;
 
-  /** cho PDF */
+  /** cho PDF & lưu progress */
   lessonId?: string;
   onPageProgress?: (info: {
     completedPages: number;
@@ -62,6 +64,7 @@ export default function LessonContentViewer(props: {
   const {
     type = "video",
     youtubeUrl,
+    videoUrl,
     pdfUrl,
     durationSeconds,
     resumeFromSeconds = 0,
@@ -76,13 +79,13 @@ export default function LessonContentViewer(props: {
     initialPage,
   } = props;
 
-  // ⚡ Handler riêng cho PDF: vừa báo ra ngoài, vừa gọi API lưu DB
+  // ================== PDF: handler lưu progress ==================
   async function handlePdfPageProgress(info: {
     completedPages: number;
     totalPages: number;
     currentPage: number;
   }) {
-    // báo cho parent (nếu có) để update UI như cũ
+    // báo cho parent update UI (như trước đây)
     if (onPageProgress) {
       try {
         onPageProgress(info);
@@ -91,14 +94,14 @@ export default function LessonContentViewer(props: {
       }
     }
 
-    // không có lessonId thì thôi, tránh call API
+    // không có lessonId thì thôi
     if (!lessonId) return;
 
     try {
       await authFetch(`/lessons/${lessonId}/progress`, {
         method: "PATCH",
         body: JSON.stringify({
-          // PDF không dùng watchedSeconds / lastPositionSec nhưng BE có thể expect field → gửi 0 cho an toàn
+          // PDF không dùng watchedSeconds / lastPositionSec nhưng BE có thể expect field
           watchedSeconds: 0,
           lastPositionSec: 0,
           pdfCurrentPage: info.currentPage,
@@ -111,19 +114,41 @@ export default function LessonContentViewer(props: {
     }
   }
 
-  if (type === "video" && youtubeUrl) {
-    return (
-      <YouTubeTrackedPlayer
-        youtubeUrl={youtubeUrl}
-        resumeFromSeconds={resumeFromSeconds}
-        onValidWatchTick={onValidWatchTick}
-        onViolation={disableGuards ? undefined : onViolation}
-        onEnded={disableGuards ? undefined : onEnded}
-        disableGuards={disableGuards}
-      />
-    );
+  // ================== VIDEO ==================
+  if (type === "video") {
+    // 1) Link YouTube → dùng YouTubeTrackedPlayer
+    if (youtubeUrl) {
+      return (
+        <YouTubeTrackedPlayer
+          youtubeUrl={youtubeUrl}
+          durationSeconds={durationSeconds ?? undefined}
+          resumeFromSeconds={resumeFromSeconds}
+          onValidWatchTick={onValidWatchTick}
+          onViolation={disableGuards ? undefined : onViolation}
+          onEnded={disableGuards ? undefined : onEnded}
+          disableGuards={disableGuards}
+          storageNamespace={lessonId} // để sau này muốn lưu resume theo lessonId
+        />
+      );
+    }
+
+    // 2) Video mp4 nội bộ / video http(s) khác → LocalVideoTrackedPlayer
+    if (videoUrl) {
+      return (
+        <LocalVideoTrackedPlayer
+          src={videoUrl}
+          durationSeconds={durationSeconds ?? undefined}
+          resumeFromSeconds={resumeFromSeconds}
+          onValidWatchTick={onValidWatchTick}
+          onViolation={disableGuards ? undefined : onViolation}
+          onEnded={disableGuards ? undefined : onEnded}
+          disableGuards={disableGuards}
+        />
+      );
+    }
   }
 
+  // ================== PDF ==================
   if (type === "pdf" && pdfUrl) {
     return (
       <PdfTrackedViewer
@@ -133,7 +158,6 @@ export default function LessonContentViewer(props: {
         onEnded={onEnded}
         disableGuards={disableGuards}
         lessonId={lessonId}
-        // ⚡ dùng handler mới: vừa gọi onPageProgress cũ, vừa bắn API
         onPageProgress={handlePdfPageProgress}
         initialCompletedPages={initialPdfCompletedPages}
         initialTotalPages={initialPdfTotalPages}
@@ -142,5 +166,6 @@ export default function LessonContentViewer(props: {
     );
   }
 
+  // ================== Fallback ==================
   return <div>Chưa hỗ trợ nội dung này.</div>;
 }
