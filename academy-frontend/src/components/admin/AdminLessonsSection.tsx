@@ -231,6 +231,7 @@ export default function AdminLessonsSection() {
             order_index:
               form.order_index === "" ? undefined : Number(form.order_index),
             is_mandatory: form.is_mandatory,
+            course_id: form.course_id,
             // course_id giữ nguyên course cũ, BE không cần đổi
           }),
         });

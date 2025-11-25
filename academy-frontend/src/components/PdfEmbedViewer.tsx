@@ -138,11 +138,17 @@ export default function PdfTrackedViewer({
           whiteSpace: "pre-line",
         }}
       >
-        {totalSeconds
-          ? `• PDF được tính thời gian học tổng ~${Math.ceil(
-              totalSeconds / 60
-            )} phút.\n• Chỉ tính khi tab đang mở và nội dung đang hiển thị.`
-          : `• PDF được tính theo thời gian xem thực tế.\n• Chỉ tính khi tab đang mở và nội dung đang hiển thị.`}
+        {typeof totalSeconds === "number" && totalSeconds > 0 ? (
+          <>
+            {`• PDF có tổng ${totalSeconds} trang.\n`}
+            {`• Chỉ tính khi tab đang mở và nội dung đang hiển thị.`}
+          </>
+        ) : (
+          <>
+            {`• PDF được tính theo thời gian xem thực tế.\n`}
+            {`• Chỉ tính khi tab đang mở và nội dung đang hiển thị.`}
+          </>
+        )}
       </div>
     </div>
   );

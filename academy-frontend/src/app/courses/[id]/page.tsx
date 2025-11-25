@@ -23,10 +23,15 @@ interface Lesson {
   title: string;
   type: string;
   duration_minutes: number | null;
+  // thêm nếu BE có:
+  duration_seconds?: number | null;
+  pdfTotalPages?: number | null;
   is_required: boolean;
   user_progress: {
     completed: boolean;
     unlocked: boolean;
+    // nếu BE trả pdfTotalPages trong progress:
+    pdfTotalPages?: number | null;
   };
 }
 
@@ -311,15 +316,33 @@ export default function CourseDetailPage() {
           <Stack spacing={1.5}>
             {Array.isArray(course.lessons) && course.lessons.length > 0 ? (
               course.lessons.map((lesson) => {
+                const isPdf = lesson.type === "pdf";
+
                 const safeOrder =
                   typeof lesson.order === "number"
                     ? lesson.order
                     : (lesson as any).order_index ?? 0;
 
-                const safeDuration =
-                  typeof lesson.duration_minutes === "number"
+                // VIDEO: dùng duration_minutes nếu có, fallback duration_seconds / 60
+                const durationForVideo = !isPdf
+                  ? typeof lesson.duration_minutes === "number"
                     ? lesson.duration_minutes
-                    : null;
+                    : typeof (lesson as any).duration_seconds === "number"
+                    ? Math.ceil(
+                        ((lesson as any).duration_seconds as number) / 60
+                      )
+                    : null
+                  : null;
+
+                // PDF: ưu tiên pdfTotalPages trong progress, sau đó tới field riêng, 
+                // rồi duration_seconds, cuối cùng duration_minutes (BE đã map sẵn số trang)
+                const pageCount = isPdf
+                  ? (lesson.user_progress as any)?.pdfTotalPages ??
+                    (lesson as any).pdfTotalPages ??
+                    (lesson as any).duration_seconds ??
+                    lesson.duration_minutes ??
+                    null
+                  : null;
 
                 return (
                   <LessonRow
@@ -328,7 +351,8 @@ export default function CourseDetailPage() {
                     order={safeOrder}
                     title={lesson.title || "Không có tiêu đề"}
                     type={lesson.type || "N/A"}
-                    duration_minutes={safeDuration}
+                    duration_minutes={durationForVideo}
+                    pageCount={pageCount}
                     is_required={!!lesson.is_required}
                     completed={!!lesson.user_progress?.completed}
                     unlocked={lesson.user_progress?.unlocked ?? true}

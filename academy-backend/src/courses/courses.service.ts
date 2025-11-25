@@ -189,42 +189,56 @@ export class CoursesService {
       is_completed: finished,
     };
 
-    const rawLessons = course.lessons.map((l) => {
+    /**
+     * Build danh sách bài học:
+     * - PDF/SLIDE: duration_seconds = số trang ⇒ duration_minutes = số_trang
+     * - VIDEO/TEXT: duration_minutes = số phút (>=1)
+     * - user_progress: { completed, unlocked }
+     */
+    const baseLessons = course.lessons.map((l) => {
       const lp = l.progresses[0];
+
+      // ép duration_seconds về number an toàn
+      const rawSec = Number(l.duration_seconds);
+      let duration_minutes: number | null = null;
+
+      if (Number.isFinite(rawSec) && rawSec > 0) {
+        if (l.type === 'pdf' || l.type === 'slide') {
+          // PDF/SLIDE: duration_seconds là SỐ TRANG
+          duration_minutes = Math.max(1, Math.floor(rawSec));
+        } else {
+          // VIDEO/TEXT: đổi sang phút
+          duration_minutes = Math.max(1, Math.round(rawSec / 60));
+        }
+      }
+
+      const completed = !!lp?.completed;
 
       return {
         id: l.id,
         order: l.order_index,
         title: l.title,
         type: l.type,
-        duration_minutes:
-          typeof l.duration_seconds === 'number'
-            ? Math.ceil(l.duration_seconds / 60)
-            : null,
+        duration_minutes,
         is_required: l.is_mandatory,
-        completed: lp ? !!lp.completed : false,
+        completed,
       };
     });
 
-    const lessons = rawLessons.map((lesson, idx) => {
-      if (idx === 0) {
-        return {
-          ...lesson,
-          user_progress: {
-            completed: lesson.completed,
-            unlocked: true,
-          },
-        };
-      }
-
-      const prevLesson = rawLessons[idx - 1];
-      const prevDone = !!prevLesson.completed;
+    // Áp dụng rule mở khoá: bài 1 luôn mở; các bài sau chỉ mở khi bài trước completed
+    const lessons = baseLessons.map((lesson, idx) => {
+      const unlocked = idx === 0 ? true : !!baseLessons[idx - 1]?.completed;
 
       return {
-        ...lesson,
+        id: lesson.id,
+        order: lesson.order,
+        title: lesson.title,
+        type: lesson.type,
+        duration_minutes: lesson.duration_minutes,
+        is_required: lesson.is_required,
         user_progress: {
           completed: lesson.completed,
-          unlocked: prevDone,
+          unlocked,
         },
       };
     });

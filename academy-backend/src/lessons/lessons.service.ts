@@ -498,16 +498,16 @@ export class LessonsService {
     };
   }
 
-  /** MARK violation (video only) */
+  /** MARK violation (video only) – reset tiến độ nhưng KHÔNG giữ cờ vi phạm trong DB */
   async markViolation(args: {
     userId: string;
     userRole: string;
     lessonId: string;
-    reason: string;
-    reset: boolean;
+    reason: string; // hiện tại chỉ dùng để log/coverage, không lưu cờ cứng nữa
+    reset: boolean; // true => reset watched về 0
     coverage?: any;
   }) {
-    const { userId, userRole, lessonId, reason, reset, coverage } = args;
+    const { userId, userRole, lessonId, reset, coverage } = args;
 
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
@@ -527,25 +527,27 @@ export class LessonsService {
       throw new ForbiddenException('Not allowed to access this lesson');
     }
 
-    // Non-video: không gắn cờ vi phạm
+    // Non-video: bỏ qua
     if (lesson.type !== 'video') {
       return { ok: true, message: 'No violation for non-video lessons' };
     }
 
     const now = new Date();
+
+    // 👉 KHÔNG set violated_at / violation_reason nữa
     const progressUpdate: Prisma.UserLessonProgressUpdateInput = {
-      violated_at: now,
-      violation_reason: reason,
       last_seen_at: now,
     };
-    if (typeof coverage !== 'undefined') {
-      (progressUpdate as any).coverage_json = coverage as any;
-    }
+
     if (reset) {
       progressUpdate.watched_seconds = 0;
       progressUpdate.last_position_sec = 0;
       progressUpdate.completed = false;
       progressUpdate.completed_at = null;
+    }
+
+    if (typeof coverage !== 'undefined') {
+      (progressUpdate as any).coverage_json = coverage as any;
     }
 
     const updated = await this.prisma.userLessonProgress.upsert({
@@ -558,10 +560,10 @@ export class LessonsService {
         completed_at: null,
         last_seen_at: now,
         last_position_sec: 0,
-        violated_at: now,
-        violation_reason: reason,
-        coverage_json:
-          typeof coverage !== 'undefined' ? (coverage as any) : undefined,
+        // không gắn cờ vi phạm trong DB
+        ...(typeof coverage !== 'undefined'
+          ? { coverage_json: coverage as any }
+          : {}),
         pdfCompletedPages: 0,
         pdfTotalPages: 0,
       },
@@ -588,7 +590,7 @@ export class LessonsService {
 
     return {
       ok: true,
-      message: 'Violation marked',
+      message: 'Violation handled: progress reset (no persistent flag)',
       lessonMeta: this.buildLessonMeta(lesson),
       lessonProgress: updated,
       courseProgress,
@@ -714,6 +716,8 @@ export class LessonsService {
     return created;
   }
 
+  // lessons.service.ts
+
   /** Admin cập nhật bài học */
   async updateLessonForAdmin(lessonId: string, dto: AdminUpdateLessonDto) {
     const existing = await this.prisma.lesson.findUnique({
@@ -724,11 +728,16 @@ export class LessonsService {
       throw new NotFoundException('Lesson không tồn tại');
     }
 
+    // kiểm tra xem có đổi khoá không
+    const targetCourseId = dto.course_id ?? existing.course_id;
+    const courseChanged =
+      typeof dto.course_id === 'string' && dto.course_id !== existing.course_id;
+
     const updated = await this.prisma.lesson.update({
       where: { id: lessonId },
       data: {
         title: dto.title ?? existing.title,
-        course_id: dto.course_id ?? existing.course_id,
+        course_id: targetCourseId,
         type: (dto.type ?? existing.type) as LessonType,
         duration_seconds:
           typeof dto.duration_seconds === 'number'
@@ -766,6 +775,30 @@ export class LessonsService {
         pdf_url: true,
       },
     });
+
+    // 🔁 Nếu đổi sang khoá khác → reset tiến độ bài học cho TẤT CẢ user
+    if (courseChanged) {
+      // 1) reset mọi progress của lesson này
+      await this.prisma.userLessonProgress.updateMany({
+        where: { lesson_id: lessonId },
+        data: {
+          watched_seconds: 0,
+          completed: false,
+          completed_at: null,
+          last_position_sec: 0,
+          violated_at: null,
+          violation_reason: null,
+          coverage_json: Prisma.JsonNull,
+          pdfCompletedPages: 0,
+          pdfTotalPages: 0,
+          pdfCurrentPage: 1,
+        },
+      });
+
+      // 2) tính lại % khoá cho tất cả user của khoá cũ & khoá mới
+      await this.recalcCourseProgressForAllUsers(existing.course_id);
+      await this.recalcCourseProgressForAllUsers(targetCourseId);
+    }
 
     return updated;
   }

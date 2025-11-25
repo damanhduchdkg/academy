@@ -61,3 +61,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Ignore anything YouTube injects
 *player-script.js
+/.ytdl-cache

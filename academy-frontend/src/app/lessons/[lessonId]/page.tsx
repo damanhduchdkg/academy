@@ -398,7 +398,11 @@ export default function LessonPage() {
           {meta && (
             <Chip
               variant="outlined"
-              label={`~${Math.ceil((meta.duration_seconds || 0) / 60)} phút`}
+              label={
+                meta.type === "pdf"
+                  ? `${meta.duration_seconds || "?"} trang`
+                  : `~${Math.ceil((meta.duration_seconds || 0) / 60)} phút`
+              }
             />
           )}
         </Stack>

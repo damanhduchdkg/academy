@@ -8,7 +8,10 @@ interface LessonRowProps {
   order: number;
   title: string;
   type: string;
-  duration_minutes: number | null;
+  // video: phút
+  duration_minutes?: number | null;
+  // pdf: số trang
+  pageCount?: number | null;
   is_required?: boolean;
   completed: boolean;
   unlocked: boolean;
@@ -20,13 +23,50 @@ export function LessonRow({
   title,
   type,
   duration_minutes,
+  pageCount,
   is_required,
   completed,
   unlocked,
 }: LessonRowProps) {
-  // text hiển thị thời lượng ~X phút (ẩn nếu null)
-  const durationText =
-    typeof duration_minutes === "number" ? ` · ~${duration_minutes} phút` : "";
+  const isPdfLike = type === "pdf" || type === "slide";
+
+  // 🔹 ƯU TIÊN: PDF dùng pageCount; nếu không có thì fallback duration_minutes
+  const numericBase = (() => {
+    if (isPdfLike) {
+      if (pageCount !== null && pageCount !== undefined) {
+        return Number(pageCount);
+      }
+      if (duration_minutes !== null && duration_minutes !== undefined) {
+        return Number(duration_minutes);
+      }
+      return NaN;
+    }
+
+    // VIDEO / TEXT: chỉ dùng duration_minutes
+    if (duration_minutes === null || duration_minutes === undefined) {
+      return NaN;
+    }
+    return Number(duration_minutes);
+  })();
+
+  const hasDuration = Number.isFinite(numericBase);
+  let durationText = "";
+  let pagesText = "";
+
+  if (hasDuration) {
+    if (isPdfLike) {
+      // PDF / SLIDE: numericBase = số trang
+      pagesText = ` · ${numericBase} trang`;
+    } else {
+      // VIDEO / TEXT: hiển thị phút như cũ
+      durationText = ` · ~${numericBase} phút`;
+    }
+  } else {
+    // Không có dữ liệu → chỉ PDF mới hiển thị ? trang
+    if (isPdfLike) {
+      pagesText = " · ? trang";
+    }
+  }
 
   return (
     <Stack
@@ -43,7 +83,6 @@ export function LessonRow({
         boxShadow: "0 20px 40px rgba(0,0,0,0.03), 0 4px 8px rgba(0,0,0,0.04)",
       }}
     >
-      {/* LEFT SIDE: tiêu đề + badge */}
       <Box sx={{ flexGrow: 1 }}>
         <Stack
           direction="row"
@@ -52,7 +91,6 @@ export function LessonRow({
           flexWrap="wrap"
           sx={{ mb: 0.5 }}
         >
-          {/* Tiêu đề bài học */}
           <Typography
             variant="body1"
             sx={{
@@ -65,7 +103,6 @@ export function LessonRow({
             {order}. {title}
           </Typography>
 
-          {/* Chip BẮT BUỘC */}
           {is_required && (
             <Chip
               label="BẮT BUỘC"
@@ -82,7 +119,6 @@ export function LessonRow({
             />
           )}
 
-          {/* Chip ĐÃ HOÀN THÀNH */}
           {completed && (
             <Chip
               label="✔ Đã hoàn thành"
@@ -99,7 +135,6 @@ export function LessonRow({
             />
           )}
 
-          {/* Trường hợp tương lai: bài bị khoá */}
           {!completed && !unlocked && (
             <Chip
               label="Khoá / Chưa mở"
@@ -117,23 +152,18 @@ export function LessonRow({
           )}
         </Stack>
 
-        {/* Info phụ: loại + thời lượng */}
+        {/* PDF → hiển thị số trang, VIDEO → hiển thị phút */}
         <Typography
           variant="body2"
-          sx={{
-            color: "#666",
-            fontSize: "0.9rem",
-            lineHeight: 1.4,
-          }}
+          sx={{ color: "#666", fontSize: "0.9rem", lineHeight: 1.4 }}
         >
           Loại: {type || "N/A"}
-          {durationText}
+          {isPdfLike ? pagesText : durationText}
         </Typography>
       </Box>
 
-      {/* RIGHT SIDE: nút hành động */}
+      {/* phần nút giữ nguyên */}
       {completed ? (
-        // ĐÃ HOÀN THÀNH → vẫn cho xem lại
         <Button
           component={Link}
           href={`/lessons/${id}`}
@@ -156,7 +186,6 @@ export function LessonRow({
           Xem lại
         </Button>
       ) : unlocked ? (
-        // CHƯA HOÀN THÀNH + đã mở khoá → Học bài
         <Button
           component={Link}
           href={`/lessons/${id}`}
@@ -179,7 +208,6 @@ export function LessonRow({
           Học bài
         </Button>
       ) : (
-        // CHƯA MỞ KHOÁ → chỉ báo trạng thái
         <Chip
           label="Chưa mở khoá"
           sx={{
