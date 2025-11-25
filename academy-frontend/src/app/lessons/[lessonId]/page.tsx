@@ -1,23 +1,25 @@
 "use client";
 
 import React from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
   Typography,
   Box,
   LinearProgress,
-  Stack,
   Chip,
   Alert,
+  Button,
+  Stack,
 } from "@mui/material";
 import LessonContentViewer from "@/components/LessonContentViewer";
 import type { LessonMeta, LessonProgress } from "@/lib/types";
 import { authFetch } from "@/lib/authFetch";
 
 /* ============ Helpers ============ */
-// Ghép URL tuyệt đối về API backend (tránh localhost)
+
+// Ghép URL tuyệt đối về API backend (tránh localhost lệch)
 const toAbs = (u?: string | null) => {
   if (!u) return null;
   if (/^https?:\/\//i.test(u)) return u;
@@ -26,7 +28,7 @@ const toAbs = (u?: string | null) => {
 };
 
 // Nếu endpoint /files cần token qua query (vì iframe không gửi header)
-const APPEND_TOKEN_IN_QUERY = true; // đổi true nếu BE yêu cầu token ở query
+const APPEND_TOKEN_IN_QUERY = true;
 const withTokenQ = (absUrl: string | null) => {
   if (!absUrl) return null;
   if (!APPEND_TOKEN_IN_QUERY) return absUrl;
@@ -70,6 +72,8 @@ export default function LessonPage() {
   const rawId = p?.lessonId;
   const lessonId = Array.isArray(rawId) ? rawId[0] : rawId || "";
 
+  const router = useRouter();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -84,6 +88,17 @@ export default function LessonPage() {
   const [pdfCompletedPages, setPdfCompletedPages] = React.useState(0);
   const [pdfTotalPages, setPdfTotalPages] = React.useState(0);
   const [pdfCurrentPage, setPdfCurrentPage] = React.useState(1);
+
+  // điều hướng Bài trước / Bài tiếp
+  const [nav, setNav] = React.useState<{
+    prevId: string | null;
+    nextId: string | null;
+    courseCompleted: boolean;
+  }>({
+    prevId: null,
+    nextId: null,
+    courseCompleted: false,
+  });
 
   // nhận từ PdfTrackedViewer
   const handlePageProgress = React.useCallback(
@@ -111,7 +126,9 @@ export default function LessonPage() {
 
   const apply = React.useCallback(
     (payload: any) => {
-      if (payload?.lessonMeta) setMeta(payload.lessonMeta as LessonMeta);
+      if (payload?.lessonMeta) {
+        setMeta(payload.lessonMeta as LessonMeta);
+      }
 
       if (payload?.lessonProgress) {
         const lp: any = payload.lessonProgress;
@@ -160,6 +177,48 @@ export default function LessonPage() {
       cancelled = true;
     };
   }, [lessonId, apply]);
+
+  // Load danh sách bài trong khoá để tính Bài trước / Bài tiếp
+  React.useEffect(() => {
+    if (!meta?.course_id) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const course: {
+          id: string;
+          courseProgress?: { is_completed: boolean };
+          lessons: { id: string; order: number }[];
+        } = await authFetch(`/courses/${meta.course_id}`, {
+          method: "GET",
+          timeoutMs: 12000,
+          retries: 1,
+        });
+
+        if (cancelled) return;
+
+        const lessons = Array.isArray(course.lessons) ? course.lessons : [];
+        const idx = lessons.findIndex((l) => l.id === meta.id);
+
+        const prev = idx > 0 ? lessons[idx - 1] : null;
+        const next =
+          idx >= 0 && idx < lessons.length - 1 ? lessons[idx + 1] : null;
+
+        setNav({
+          prevId: prev?.id ?? null,
+          nextId: next?.id ?? null,
+          courseCompleted: !!course.courseProgress?.is_completed,
+        });
+      } catch (e) {
+        console.error("load course nav failed", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meta?.id, meta?.course_id]);
 
   // Nếu đã hoàn thành, xoá resume cho YouTube
   React.useEffect(() => {
@@ -438,6 +497,39 @@ export default function LessonPage() {
             {err}
           </Alert>
         )}
+
+        {/* ===== Nút Bài trước / Bài tiếp ===== */}
+        <Stack
+          direction="row"
+          spacing={2}
+          justifyContent="space-between"
+          sx={{ mt: 3 }}
+        >
+          {/* Bài trước: có prevId thì hiện nút */}
+          {nav.prevId ? (
+            <Button
+              variant="outlined"
+              onClick={() => router.push(`/lessons/${nav.prevId}`)}
+            >
+              ← Bài trước
+            </Button>
+          ) : (
+            <Box />
+          )}
+
+          {/* Bài tiếp: chỉ hiện khi bài này đã hoàn thành và có nextId */}
+          {isCompleted && nav.nextId ? (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => router.push(`/lessons/${nav.nextId}`)}
+            >
+              Bài tiếp →
+            </Button>
+          ) : (
+            <Box />
+          )}
+        </Stack>
       </CardContent>
     </Card>
   );

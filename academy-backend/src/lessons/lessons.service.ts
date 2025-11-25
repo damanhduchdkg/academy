@@ -596,7 +596,6 @@ export class LessonsService {
       courseProgress,
     };
   }
-
   /** Chuẩn hoá metadata cho FE – GIỜ đã có pdf_url + video_url tuyệt đối */
   private buildLessonMeta(lesson: any) {
     const origin = process.env.BACKEND_PUBLIC_ORIGIN || 'http://localhost:3000';
@@ -655,6 +654,9 @@ export class LessonsService {
           ? '(Nội dung text tạm thời - cập nhật sau từ DB)'
           : null,
       pdf_file_id: lesson.pdf_file_id ?? null,
+
+      // ⭐ QUAN TRỌNG: thêm course_id cho FE dùng để tìm Bài trước/Bài tiếp
+      course_id: lesson.course_id,
     };
   }
 

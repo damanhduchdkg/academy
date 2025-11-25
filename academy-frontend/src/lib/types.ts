@@ -9,6 +9,7 @@ export type LessonMeta = {
   pdf_url: string | null;
   slide_url: string | null;
   text_content: string | null;
+  course_id?: string | null;
 };
 
 export type LessonProgress = {
@@ -20,4 +21,6 @@ export type LessonProgress = {
   last_position_sec: number;
   violated_at?: string | null;
   violation_reason?: string | null;
+  // ⭐ thêm field này để không bị lỗi TS khi đọc từ BE
+  pdfCurrentPage?: number;
 };
