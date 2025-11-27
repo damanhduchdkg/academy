@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service';
@@ -19,6 +20,7 @@ import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
+import { Response } from 'express';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('admin/courses')
@@ -119,5 +121,47 @@ export class AdminCoursesController {
     @Param('userId') userId: string,
   ) {
     return this.coursesService.unassignUserFromCourse(courseId, userId);
+  }
+
+  /**
+   * Export báo cáo tiến độ học của 1 khoá ra file CSV
+   * GET /admin/courses/:id/export-report?from=YYYY-MM-DD&to=YYYY-MM-DD
+   */
+  @Get(':id/export-report-csv')
+  @Roles(Role.admin, Role.manager)
+  async exportCourseReport(
+    @Param('id') courseId: string,
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const { filename, csv } = await this.coursesService.exportCourseReportAsCsv(
+      {
+        courseId,
+        from,
+        to,
+      },
+    );
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    return res.send(csv);
+  }
+
+  /**
+   * GET /admin/courses/:id/export-report
+   * Export báo cáo khoá học dạng Excel
+   */
+  @Get(':id/export-report-excel')
+  @Roles(Role.admin, Role.manager)
+  async exportReport(@Param('id') courseId: string, @Res() res: Response) {
+    return this.coursesService.exportCourseExcelReport(courseId, res);
+  }
+  // GET /admin/courses/export-report-all  (báo cáo tổng tất cả khoá)
+  @Get('export-report-all')
+  @Roles(Role.admin, Role.manager)
+  async exportAllCoursesReport(@Res() res: Response) {
+    return this.coursesService.exportAllCoursesExcelReport(res);
   }
 }

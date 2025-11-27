@@ -31,6 +31,7 @@ import {
   EditOutlined,
   DeleteOutline,
   RefreshOutlined,
+  QueryStatsOutlined,
 } from "@mui/icons-material";
 import { authFetch } from "@/lib/authFetch";
 
@@ -268,8 +269,59 @@ export default function AdminCoursesSection() {
   /* ====== MỞ TRANG BÀI HỌC CỦA KHOÁ ====== */
   const handleOpenLessons = (courseId: string) => {
     if (typeof window === "undefined") return;
-    // Dùng full reload giống sidebar admin để tránh bug navigate chậm / sai ID
     window.location.href = `/admin/courses/${courseId}/lessons`;
+  };
+
+  /* ====== MỞ TRANG THỐNG KÊ CỦA KHOÁ ====== */
+  const handleOpenAnalytics = (courseId: string) => {
+    if (typeof window === "undefined") return;
+    window.location.href = `/admin/courses/${courseId}/analytics`;
+  };
+
+  const handleExportAllCourses = async () => {
+    try {
+      if (typeof window === "undefined") return;
+
+      const token =
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("token") ||
+        localStorage.getItem("academy_token");
+
+      if (!token) {
+        alert("Không tìm thấy token đăng nhập!");
+        return;
+      }
+
+      const apiBase =
+        process.env.NEXT_PUBLIC_API_BASE || "http://192.168.0.113:3000";
+
+      const url = `${apiBase}/admin/courses/export-report-all`;
+
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        throw new Error(`Export lỗi: ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = "Bao_cao_khoa_hoc.xlsx"; // tên file
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "Không xuất được báo cáo tổng các khoá");
+    }
   };
 
   /* ================== RENDER ================== */
@@ -328,6 +380,19 @@ export default function AdminCoursesSection() {
               >
                 Thêm khoá
               </Button>
+              {/* NÚT BÁO CÁO TỔNG */}
+              <Button
+                variant="outlined"
+                sx={{
+                  borderRadius: "999px",
+                  textTransform: "none",
+                  fontWeight: 500,
+                  px: 2.5,
+                }}
+                onClick={handleExportAllCourses}
+              >
+                📥 Xuất báo cáo tổng
+              </Button>
             </Stack>
           </Box>
 
@@ -344,6 +409,7 @@ export default function AdminCoursesSection() {
                 <TableCell align="center">Số bài học</TableCell>
                 <TableCell align="center">Trạng thái</TableCell>
                 <TableCell align="center">Bài học</TableCell>
+                {/* <TableCell align="center">Thống kê</TableCell> */}
                 <TableCell align="right">Thao tác</TableCell>
               </TableRow>
             </TableHead>
@@ -412,7 +478,40 @@ export default function AdminCoursesSection() {
                     </Button>
                   </TableCell>
 
+                  {/* NÚT THỐNG KÊ */}
+                  {/* <TableCell align="center">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleOpenAnalytics(course.id)}
+                      sx={{
+                        borderRadius: "999px",
+                        textTransform: "none",
+                        fontSize: "0.8rem",
+                        px: 0.5,
+                        py: 0.5,
+                        borderWidth: 1.5,
+                        "&:hover": {
+                          borderWidth: 1.5,
+                          backgroundColor: "rgba(2,0,107,0.06)",
+                        },
+                      }}
+                    >
+                      Thống kê
+                    </Button>
+                  </TableCell> */}
+
                   <TableCell align="right">
+                    {/* Nút xem thống kê */}
+                    <IconButton
+                      size="small"
+                      onClick={() => handleOpenAnalytics(course.id)}
+                      title="Xem thống kê khoá học"
+                    >
+                      <QueryStatsOutlined fontSize="small" />
+                    </IconButton>
+
+                    {/* Nút sửa */}
                     <IconButton
                       size="small"
                       onClick={() => openEditDialog(course)}
@@ -420,6 +519,8 @@ export default function AdminCoursesSection() {
                     >
                       <EditOutlined fontSize="small" />
                     </IconButton>
+
+                    {/* Nút xoá */}
                     <IconButton
                       size="small"
                       onClick={() => handleDelete(course)}
@@ -433,7 +534,7 @@ export default function AdminCoursesSection() {
 
               {courses.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={10}>
+                  <TableCell colSpan={11}>
                     <Typography
                       variant="body2"
                       sx={{ color: "text.secondary", textAlign: "center" }}

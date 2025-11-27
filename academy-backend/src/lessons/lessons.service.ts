@@ -227,12 +227,26 @@ export class LessonsService {
      * =========================
      */
 
-    // Nếu bài đã completed rồi thì không update nữa
+    // Nếu bài đã completed rồi:
+    // - KHÔNG thay đổi watched_seconds, completed, completed_at...
+    // - NHƯNG vẫn cập nhật last_seen_at để dashboard biết user đang xem lại
     if (prev?.completed) {
+      await this.prisma.userLessonProgress.update({
+        where: { user_id_lesson_id: { user_id: userId, lesson_id: lessonId } },
+        data: {
+          last_seen_at: new Date(),
+          // có thể lưu vị trí hiện tại nếu FE gửi, cho tiện resume
+          ...(Number.isFinite(lastPositionSec) && lastPositionSec >= 0
+            ? { last_position_sec: Math.floor(lastPositionSec) }
+            : {}),
+        },
+      });
+
       const { courseProgress } = await this.recalcCourseProgress({
         userId,
         courseId: lesson.course_id,
       });
+
       return {
         lessonMeta: this.buildLessonMeta(lesson),
         lessonProgress: {

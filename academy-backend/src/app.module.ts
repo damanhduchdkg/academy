@@ -18,6 +18,9 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard'; // nếu anh đã tạo
 
+import { AdminDashboardController } from './admin/admin-analytics.controller';
+import { AdminAnalyticsService } from './admin/admin-analytics.service';
+
 @Module({
   imports: [
     PrismaModule,
@@ -29,9 +32,10 @@ import { RolesGuard } from './auth/roles.guard'; // nếu anh đã tạo
     RedisModule, // 👈 ĐÂY CHÍNH LÀ “provide RedisService trong AppModule”
     FilesModule,
   ],
-  controllers: [AppController, CoursesController],
+  controllers: [AppController, CoursesController, AdminDashboardController],
   providers: [
     AppService,
+    AdminAnalyticsService,
     CoursesService,
     {
       provide: APP_GUARD,

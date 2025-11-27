@@ -11,7 +11,10 @@ import {
   Button,
   CircularProgress,
   Alert,
+  TextField,
+  InputAdornment,
 } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
 
 interface CourseItem {
   id: string;
@@ -21,8 +24,8 @@ interface CourseItem {
   is_required: boolean;
   lessons_count: number;
   courseProgress: {
-    completion_percent: number; // đã normalize từ BE
-    is_completed: boolean; // đã normalize từ BE (>=100%)
+    completion_percent: number;
+    is_completed: boolean;
   };
 }
 
@@ -38,23 +41,42 @@ export default function CoursesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [coursesResp, setCoursesResp] = useState<CoursesResponse | null>(null);
 
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // debounce search
   useEffect(() => {
-    async function fetchCourses() {
+    const handle = setTimeout(() => {
+      setSearchTerm(searchInput.trim());
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  // fetch courses
+  useEffect(() => {
+    async function fetchCourses(currentSearch: string) {
       try {
+        setLoading(true);
+        setErr(null);
+
         const token = window.localStorage.getItem("accessToken");
         if (!token) {
           window.location.href = "/login";
           return;
         }
 
-        const res = await fetch(
-          "http://localhost:3000/courses?page=1&pageSize=10",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const url = new URL("http://localhost:3000/courses");
+        url.searchParams.set("page", "1");
+        url.searchParams.set("pageSize", "10");
+        if (currentSearch) {
+          url.searchParams.set("search", currentSearch);
+        }
+
+        const res = await fetch(url.toString(), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
         if (!res.ok) {
           if (res.status === 401) {
@@ -62,24 +84,24 @@ export default function CoursesPage() {
             return;
           }
           setErr("Không tải được danh sách khoá học");
-          setLoading(false);
+          setCoursesResp(null);
           return;
         }
 
-        const data = await res.json();
+        const data = (await res.json()) as CoursesResponse;
         setCoursesResp(data);
-        setLoading(false);
       } catch (e) {
         setErr("Lỗi kết nối server");
+        setCoursesResp(null);
+      } finally {
         setLoading(false);
       }
     }
 
-    fetchCourses();
-  }, []);
+    fetchCourses(searchTerm);
+  }, [searchTerm]);
 
-  // LOADING
-  if (loading) {
+  if (loading && !coursesResp && !err) {
     return (
       <Box
         sx={{
@@ -101,8 +123,7 @@ export default function CoursesPage() {
     );
   }
 
-  // ERROR
-  if (err) {
+  if (err && !coursesResp) {
     return (
       <Box sx={{ maxWidth: 1280, mx: "auto", mt: 4, px: 2 }}>
         <Alert severity="error" sx={{ fontSize: "0.9rem" }}>
@@ -112,7 +133,6 @@ export default function CoursesPage() {
     );
   }
 
-  // OK DATA
   const items = coursesResp?.data ?? [];
   const pageInfo = coursesResp
     ? {
@@ -132,21 +152,60 @@ export default function CoursesPage() {
         pb: 6,
       }}
     >
-      {/* PAGE TITLE */}
-      <Typography
-        variant="h4"
+      {/* HEADER + SEARCH */}
+      <Box
         sx={{
-          fontWeight: 600,
-          color: "#000",
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+          alignItems: { xs: "flex-start", md: "center" },
+          justifyContent: "space-between",
+          gap: 2,
           mb: 3,
-          fontSize: { xs: "1.4rem", md: "1.6rem" },
         }}
       >
-        Khoá đào tạo
-      </Typography>
+        <Typography
+          variant="h4"
+          sx={{
+            fontWeight: 600,
+            color: "#000",
+            fontSize: { xs: "1.4rem", md: "1.6rem" },
+          }}
+        >
+          Khoá đào tạo
+        </Typography>
+
+        <TextField
+          size="small"
+          placeholder="Tìm kiếm khoá học theo tên, danh mục..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          sx={{
+            width: { xs: "100%", md: 320 },
+            backgroundColor: "#fff",
+            borderRadius: "999px",
+            "& .MuiOutlinedInput-root": {
+              borderRadius: "999px",
+            },
+          }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ fontSize: 20, color: "#9ca3af" }} />
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Box>
+
+      {err && coursesResp && (
+        <Box sx={{ mb: 2 }}>
+          <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>
+            {err}
+          </Alert>
+        </Box>
+      )}
 
       {items.length === 0 ? (
-        // fallback khi không có khoá
         <Card
           sx={{
             borderRadius: "20px",
@@ -157,15 +216,24 @@ export default function CoursesPage() {
           <CardContent sx={{ p: 3 }}>
             <Typography
               variant="body1"
-              sx={{ color: "#666", fontSize: "1rem" }}
+              sx={{ color: "#666", fontSize: "1rem", mb: 0.5 }}
             >
-              Hiện chưa có khoá học nào phù hợp.
+              {searchTerm
+                ? `Không tìm thấy khoá học phù hợp với từ khoá “${searchTerm}”.`
+                : "Hiện chưa có khoá học nào phù hợp."}
             </Typography>
+            {searchTerm && (
+              <Typography
+                variant="body2"
+                sx={{ color: "#9ca3af", fontSize: "0.85rem" }}
+              >
+                Thử rút ngắn hoặc đổi lại từ khoá khác (không cần gõ đúng dấu).
+              </Typography>
+            )}
           </CardContent>
         </Card>
       ) : (
         <>
-          {/* CARD WRAPPER: flexbox responsive */}
           <Box
             sx={{
               display: "flex",
@@ -174,17 +242,13 @@ export default function CoursesPage() {
             }}
           >
             {items.map((course) => {
-              // lấy % từ backend (đã normalize sẵn)
               const percent = Number(
                 course.courseProgress?.completion_percent ?? 0
               );
-              // đã normalize ở BE, nhưng ta vẫn clamp cho chắc
               const safePercent = Math.min(
                 100,
                 Math.max(0, Math.round(percent))
               );
-
-              // is_completed giờ cũng đã normalize ở BE = safePercent >=100
               const finished = !!course.courseProgress?.is_completed;
 
               return (
@@ -221,14 +285,8 @@ export default function CoursesPage() {
                         flexGrow: 1,
                       }}
                     >
-                      {/* TITLE + CHIP TIẾN ĐỘ */}
-                      <Stack
-                        direction="row"
-                        flexWrap="wrap"
-                        alignItems="flex-start"
-                        spacing={1}
-                        sx={{ mb: 1 }}
-                      >
+                      {/* TIÊU ĐỀ (clamp 2 dòng) */}
+                      <Box sx={{ mb: 1 }}>
                         <Typography
                           variant="h6"
                           sx={{
@@ -236,62 +294,80 @@ export default function CoursesPage() {
                             color: "#000",
                             fontSize: "1.05rem",
                             lineHeight: 1.4,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
                           }}
                         >
                           {course.title}
                         </Typography>
+                      </Box>
 
-                        {course.is_required && (
-                          <Chip
-                            size="small"
-                            label="BẮT BUỘC"
-                            sx={{
-                              backgroundColor: "#d00000",
-                              color: "#fff",
-                              fontWeight: 600,
-                              fontSize: "0.7rem",
-                              height: "24px",
-                              borderRadius: "999px",
-                              px: 1,
-                            }}
-                          />
-                        )}
+                      {/* HÀNG CHIP: BẮT BUỘC + TIẾN ĐỘ / ĐÃ HOÀN THÀNH */}
+                      <Stack
+                        direction="row"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        spacing={1}
+                        sx={{ mb: 1.5, minHeight: 32 }}
+                      >
+                        <Box sx={{ minWidth: 0 }}>
+                          {course.is_required && (
+                            <Chip
+                              size="small"
+                              label="BẮT BUỘC"
+                              sx={{
+                                backgroundColor: "#d00000",
+                                color: "#fff",
+                                fontWeight: 600,
+                                fontSize: "0.7rem",
+                                height: "24px",
+                                borderRadius: "999px",
+                                px: 1,
+                              }}
+                            />
+                          )}
+                        </Box>
 
-                        {finished ? (
-                          <Chip
-                            size="small"
-                            label="✔ Đã hoàn thành"
-                            sx={{
-                              backgroundColor: "#1e7a32",
-                              color: "#fff",
-                              fontWeight: 600,
-                              fontSize: "0.7rem",
-                              height: "24px",
-                              borderRadius: "999px",
-                              px: 1,
-                            }}
-                          />
-                        ) : (
-                          <Chip
-                            size="small"
-                            label={`Tiến độ: ${safePercent}%`}
-                            sx={{
-                              borderColor: "#f97316",
-                              color: "#f97316",
-                              borderWidth: 1,
-                              borderStyle: "solid",
-                              fontWeight: 600,
-                              fontSize: "0.7rem",
-                              height: "24px",
-                              borderRadius: "999px",
-                              px: 1,
-                              backgroundColor: "rgba(249,115,22,0.06)",
-                            }}
-                          />
-                        )}
+                        <Box sx={{ flexShrink: 0 }}>
+                          {finished ? (
+                            <Chip
+                              size="small"
+                              label="✔ Đã hoàn thành"
+                              sx={{
+                                backgroundColor: "#1e7a32",
+                                color: "#fff",
+                                fontWeight: 600,
+                                fontSize: "0.7rem",
+                                height: "24px",
+                                borderRadius: "999px",
+                                px: 1,
+                              }}
+                            />
+                          ) : (
+                            <Chip
+                              size="small"
+                              label={`Tiến độ: ${safePercent}%`}
+                              sx={{
+                                borderColor: "#f97316",
+                                color: "#f97316",
+                                borderWidth: 1,
+                                borderStyle: "solid",
+                                fontWeight: 600,
+                                fontSize: "0.7rem",
+                                height: "24px",
+                                borderRadius: "999px",
+                                px: 1,
+                                backgroundColor: "rgba(249,115,22,0.06)",
+                              }}
+                            />
+                          )}
+                        </Box>
                       </Stack>
 
-                      {/* DESCRIPTION */}
+                      {/* DESCRIPTION (clamp 2 dòng) */}
                       <Typography
                         variant="body2"
                         sx={{
@@ -299,13 +375,17 @@ export default function CoursesPage() {
                           fontSize: "0.9rem",
                           lineHeight: 1.4,
                           mb: 1,
-                          flexGrow: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
                         }}
                       >
                         {course.description || "Khoá đào tạo nội bộ"}
                       </Typography>
 
-                      {/* META */}
+                      {/* META (clamp 1 dòng) */}
                       <Typography
                         variant="caption"
                         sx={{
@@ -314,17 +394,21 @@ export default function CoursesPage() {
                           lineHeight: 1.4,
                           display: "block",
                           mb: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
                         Danh mục: {course.category || "Chung"} •{" "}
                         {course.lessons_count} bài học
                       </Typography>
 
-                      {/* ACTION BUTTON */}
+                      {/* BUTTON */}
                       <Button
                         variant="contained"
                         fullWidth
                         sx={{
+                          mt: "auto",
                           backgroundColor: "#d00000",
                           borderRadius: "12px",
                           fontWeight: 600,
@@ -350,7 +434,6 @@ export default function CoursesPage() {
             })}
           </Box>
 
-          {/* FOOTER / PAGE INFO */}
           <Box
             sx={{
               mt: 4,
@@ -361,7 +444,8 @@ export default function CoursesPage() {
             }}
           >
             Đang xem {pageInfo.count} / {pageInfo.total} khoá (Trang{" "}
-            {pageInfo.page})
+            {pageInfo.page}
+            {searchTerm ? `, từ khoá “${searchTerm}”` : ""})
           </Box>
         </>
       )}

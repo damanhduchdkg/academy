@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Tổng quan" },
   { href: "/admin/users", label: "Quản lý user" },
   { href: "/admin/courses", label: "Quản lý khoá học" },
-  { href: "/admin/lessons", label: "Quản lý bài học" }, // 👈 TAB MỚI
+  { href: "/admin/lessons", label: "Quản lý bài học" },
   { href: "/admin/files", label: "Quản lý file" },
 ];
 
@@ -31,8 +31,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   const handleNavClick = (href: string) => {
     if (typeof window === "undefined") return;
-    if (href === pathname) return; // đang ở đúng trang rồi thì thôi
-    window.location.href = href; // full reload cho chắc
+    if (href === pathname) return;
+    window.location.href = href;
   };
 
   return (
@@ -65,7 +65,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             {NAV_ITEMS.map((item) => {
               const isRoot = item.href === "/admin";
 
-              // ✅ Tổng quan chỉ active đúng /admin
               const active = isRoot
                 ? pathname === "/admin"
                 : pathname === item.href ||
